@@ -87,6 +87,12 @@ body {
     background: var(--hf-accent);
     border-color: var(--hf-accent);
 }
+.hd4-rec-btn.is-active {
+    color: var(--hf-text-bright);
+    background: var(--hf-red);
+    border-color: var(--hf-red);
+    font-variant-numeric: tabular-nums;
+}
 
 .hd4-vfx-select {
     font-family: var(--hf-font-family);

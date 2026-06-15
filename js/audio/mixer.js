@@ -166,6 +166,16 @@ export class AudioMixer {
         return rms(m.meterBuf)
     }
 
+    /** A MediaStream of the post-limiter main bus, for recording. */
+    getOutputStream() {
+        this.ensureContext()
+        if (!this._main.streamDest) {
+            this._main.streamDest = this._ctx.createMediaStreamDestination()
+            this._main.analyser.connect(this._main.streamDest)
+        }
+        return this._main.streamDest.stream
+    }
+
     /** Low-band (kick/bass) energy 0..1 of the main bus, for beat detection. */
     getMainEnergy() {
         const m = this._main

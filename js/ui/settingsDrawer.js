@@ -16,6 +16,7 @@ const SHORTCUTS = [
     ['k', 'KEY overlay'],
     ['f', 'FREEZE'],
     ['b', 'FADE to black'],
+    ['r', 'REC (record)'],
     ['a', 'AUTO (beat-synced)'],
     ['s', 'Settings'],
 ]

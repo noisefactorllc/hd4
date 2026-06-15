@@ -37,6 +37,10 @@ test('p toggles PinP and k toggles the key overlay', () => {
     assert.deepEqual(keyToAction('k'), { type: 'key' })
 })
 
+test('r toggles recording', () => {
+    assert.deepEqual(keyToAction('r'), { type: 'record' })
+})
+
 test('the mapping is case-insensitive', () => {
     assert.deepEqual(keyToAction('C'), { type: 'transitionType', value: 'cut' })
     assert.deepEqual(keyToAction('Q'), { type: 'quad' })

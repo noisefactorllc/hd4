@@ -8,7 +8,7 @@
  */
 import { VFX, VFX_ORDER } from '../vfx.js'
 
-export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill } = {}) {
+export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord } = {}) {
     container.innerHTML = ''
 
     const brand = document.createElement('div')
@@ -34,6 +34,8 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill } =
         still.setActive(true)
         setTimeout(() => still.setActive(false), 250) // momentary flash
     }, 'Capture the program as a still (KEY source / channel image)')
+    const record = toggleButton('REC', onRecord, 'Record the program (key r)')
+    record.el.classList.add('hd4-rec-btn')
 
     const vfxSelect = document.createElement('select')
     vfxSelect.className = 'hd4-vfx-select'
@@ -46,7 +48,7 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill } =
     }
     vfxSelect.addEventListener('change', () => onVfx?.(vfxSelect.value))
 
-    group.append(freeze.el, fade.el, still.el, vfxSelect)
+    group.append(freeze.el, fade.el, still.el, record.el, vfxSelect)
     container.append(brand, spacer, group)
 
     return {
@@ -55,6 +57,10 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill } =
             fade.setActive(faded)
         },
         setVfx(name) { vfxSelect.value = name },
+        setRecording(on, label) {
+            record.setActive(on)
+            record.el.textContent = on ? (label || '● REC') : 'REC'
+        },
     }
 }
 

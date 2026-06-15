@@ -28,6 +28,7 @@ import { CompositorState } from './compositorState.js'
 import { AudioMixer } from './audio/mixer.js'
 import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
 import { StillStore } from './still.js'
+import { Recorder, recordingFilename } from './recorder.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
@@ -102,6 +103,8 @@ async function boot() {
     state.compositorState = compositorState
     const stillStore = new StillStore()
     state.still = stillStore
+    const recorder = new Recorder()
+    state.recorder = recorder
 
     // --- Top bar: brand + master output controls ---
     const outputBar = buildOutputBar(document.getElementById('hd4-topbar'), {
@@ -109,6 +112,7 @@ async function boot() {
         onFade: () => output.toggleFade(now()),
         onVfx: (name) => output.setVfx(name),
         onStill: () => captureStill(),
+        onRecord: () => toggleRecording(),
     })
 
     // --- Program view + compositor ---
@@ -212,6 +216,26 @@ async function boot() {
         multiview.setStillAvailable(true)
     }
 
+    // --- Recording (program canvas + main-bus audio → file) ---
+    const buildRecordStream = () => {
+        const stream = programView.canvas.captureStream(30)
+        try {
+            for (const track of audio.getOutputStream().getAudioTracks()) stream.addTrack(track)
+        } catch (e) { console.warn('[hd4] recording without audio', e?.message || e) }
+        return stream
+    }
+    const toggleRecording = async () => {
+        if (recorder.recording) {
+            const out = await recorder.stop()
+            outputBar.setRecording(false)
+            if (out && out.blob.size > 0) downloadBlob(out.blob, recordingFilename(new Date(), out.type))
+            state.lastRecording = out ? { size: out.blob.size, type: out.type } : null
+            return
+        }
+        await audio.resume()
+        if (recorder.start(buildRecordStream(), { now: now() })) outputBar.setRecording(true)
+    }
+
     // --- Audio mixer panel (channel strips + main) ---
     const mixerPanel = buildMixerPanel(document.getElementById('hd4-mixer'), {
         channelCount: CHANNEL_COUNT,
@@ -257,6 +281,7 @@ async function boot() {
         quad: () => { compositorState.toggleComposition('quad'); syncComposition() },
         pinp: () => { compositorState.toggleComposition('pinp'); syncComposition() },
         key: () => { compositorState.toggleKey(); syncComposition() },
+        record: () => toggleRecording(),
         freeze: () => output.toggleFreeze(),
         fade: () => output.toggleFade(now()),
         auto: () => {
@@ -323,6 +348,7 @@ async function boot() {
         compositor.draw(pres, switcher.type, out)
         programView.setLive(switcher.live, switcher.transitioning)
         outputBar.setState({ freeze: output.freeze, faded: output.faded })
+        if (recorder.recording) outputBar.setRecording(true, `● ${formatElapsed(recorder.elapsed(t))}`)
         for (let i = 0; i < CHANNEL_COUNT; i++) mixerPanel.setMeter(i, audio.getMeter(i))
         mixerPanel.setMainMeter(audio.getMainMeter())
         _rafId = requestAnimationFrame(frame)
@@ -344,6 +370,8 @@ async function boot() {
         composition: compositorState,
         still: stillStore,
         captureStill,
+        recorder,
+        get lastRecording() { return state.lastRecording || null },
         audio,
         memory,
         beatClock,
@@ -392,6 +420,24 @@ async function applySourceChoice(index, choice) {
 
 function now() {
     return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+}
+
+/** mm:ss from milliseconds, for the recording readout. */
+function formatElapsed(ms) {
+    const s = Math.floor(ms / 1000)
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+/** Trigger a browser download of a Blob. */
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 /**
