@@ -20,9 +20,11 @@ import { buildMultiview } from './ui/multiview.js'
 import { Switcher } from './switcher.js'
 import { ProgramCompositor } from './programCompositor.js'
 import { OutputState } from './outputState.js'
+import { AudioMixer } from './audio/mixer.js'
 import { buildProgramView } from './ui/programView.js'
 import { buildTransitionBar } from './ui/transitionBar.js'
 import { buildOutputBar } from './ui/outputBar.js'
+import { buildMixerPanel } from './ui/mixerPanel.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -46,14 +48,23 @@ async function boot() {
     const app = document.getElementById('app')
     if (app) app.dataset.booted = 'true'
 
+    // --- Audio mixer (WebAudio; context created lazily on first source) ---
+    const audio = new AudioMixer({ channelCount: CHANNEL_COUNT })
+    state.audio = audio
+
     // --- Channels: each a persistent renderer with a pluggable source ---
     for (let i = 0; i < CHANNEL_COUNT; i++) {
         const canvas = document.createElement('canvas')
         const renderer = new ChannelRenderer(canvas, { width: CHANNEL_W, height: CHANNEL_H })
+        const audioBinding = {
+            connectStream: (s) => audio.connectStream(i, s),
+            connectElement: (el) => audio.connectElement(i, el),
+            disconnect: () => audio.disconnectChannel(i),
+        }
         const channel = new Channel({
             id: i + 1,
             canvas,
-            driverFactory: makeChannelDriverFactory(renderer),
+            driverFactory: makeChannelDriverFactory(renderer, audioBinding),
         })
         state.channels.push(channel)
         state.renderers.push(renderer)
@@ -94,6 +105,17 @@ async function boot() {
         onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => multiview.refresh()),
     })
 
+    // --- Audio mixer panel (channel strips + main) ---
+    const mixerPanel = buildMixerPanel(document.getElementById('hd4-mixer'), {
+        channelCount: CHANNEL_COUNT,
+        initialFaders: state.channels.map((_, i) => audio.faderOf(i)),
+        initialMainFader: audio.mainFader(),
+        onFader: (i, pos) => audio.setFader(i, pos),
+        onMute: (i) => mixerPanel.setMuted(i, audio.toggleMute(i)),
+        onSolo: (i) => mixerPanel.setSoloed(i, audio.toggleSolo(i)),
+        onMainFader: (pos) => audio.setMainFader(pos),
+    })
+
     // Default each channel to a distinct shader (no permission prompt on
     // first run; the user can switch any channel to a camera or file).
     await Promise.all(state.channels.map((ch, i) => {
@@ -110,6 +132,8 @@ async function boot() {
         compositor.draw(pres, switcher.type, out)
         programView.setLive(switcher.live, switcher.transitioning)
         outputBar.setState({ quad: output.quad, freeze: output.freeze, faded: output.faded })
+        for (let i = 0; i < CHANNEL_COUNT; i++) mixerPanel.setMeter(i, audio.getMeter(i))
+        mixerPanel.setMainMeter(audio.getMainMeter())
         _rafId = requestAnimationFrame(frame)
     }
     _rafId = requestAnimationFrame(frame)
@@ -126,6 +150,7 @@ async function boot() {
         switcher,
         compositor,
         output,
+        audio,
         get ready() { return state.ready },
         sampleChannelBrightness: (i) => brightnessOf(state.channels[i]?.canvas),
         sampleChannelAvg: (i) => avgColorOf(state.channels[i]?.canvas),

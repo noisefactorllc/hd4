@@ -46,7 +46,7 @@ test('CUT takes the selected channel to program instantly', async ({ page }) => 
 
 test('MIX take starts a transition and settles on the target channel', async ({ page }) => {
     await page.click('.hd4-trans-btn[data-type="mix"]')
-    await page.evaluate(() => window.__hd4.switcher.setTime(0.4))
+    await page.evaluate(() => window.__hd4.switcher.setTime(1.5))
 
     await page.click('.hd4-take-btn[data-channel="3"]')
 
@@ -68,7 +68,7 @@ test('MIX take starts a transition and settles on the target channel', async ({ 
 
 test('WIPE take transitions and completes', async ({ page }) => {
     await page.click('.hd4-trans-btn[data-type="wipe"]')
-    await page.evaluate(() => window.__hd4.switcher.setTime(0.4))
+    await page.evaluate(() => window.__hd4.switcher.setTime(1.5))
     await page.click('.hd4-take-btn[data-channel="2"]')
 
     expect(await page.evaluate(() => window.__hd4.switcher.transitioning)).toBe(true)

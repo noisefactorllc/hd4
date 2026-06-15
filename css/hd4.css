@@ -329,3 +329,93 @@ body {
     outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
     outline-offset: var(--hf-focus-ring-offset);
 }
+
+/* ---- Audio mixer panel ---- */
+.hd4-mixer { display: flex; align-items: stretch; padding: var(--hf-space-2); }
+
+.hd4-mixer-panel {
+    display: flex;
+    gap: var(--hf-space-3);
+    align-items: flex-end;
+    height: 100%;
+}
+
+.hd4-strip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--hf-space-2);
+    padding: var(--hf-space-2);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    background: var(--hf-bg-elevated);
+}
+
+.hd4-strip-main {
+    background: var(--hf-bg-surface);
+    border-color: var(--hf-border-hover);
+    margin-left: var(--hf-space-4);
+}
+
+.hd4-strip-btns { display: flex; gap: var(--hf-space-1); min-height: 1.5rem; }
+
+.hd4-strip-btn {
+    width: 1.6rem;
+    height: 1.5rem;
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-xs);
+    font-weight: var(--hf-weight-bold);
+    color: var(--hf-text-dim);
+    background: var(--hf-bg-surface);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    cursor: pointer;
+    transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
+}
+.hd4-strip-btn:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+.hd4-strip-btn:focus-visible {
+    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
+    outline-offset: var(--hf-focus-ring-offset);
+}
+.hd4-solo-btn.is-active { color: var(--hf-bg-base); background: var(--hf-yellow); border-color: var(--hf-yellow); }
+.hd4-mute-btn.is-active { color: var(--hf-bg-base); background: var(--hf-red); border-color: var(--hf-red); }
+
+.hd4-strip-fader-row { display: flex; gap: var(--hf-space-2); align-items: stretch; height: 120px; }
+
+.hd4-meter {
+    position: relative;
+    width: 0.5rem;
+    background: var(--hf-bg-base);
+    border: 1px solid var(--hf-border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.hd4-meter-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0%;
+    background: linear-gradient(to top, var(--hf-green) 0%, var(--hf-yellow) 75%, var(--hf-red) 100%);
+}
+
+.hd4-fader {
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 1.5rem;
+    height: 120px;
+    accent-color: var(--hf-accent);
+    cursor: pointer;
+}
+.hd4-fader:focus-visible {
+    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
+    outline-offset: var(--hf-focus-ring-offset);
+}
+
+.hd4-strip-label {
+    font-family: var(--hf-font-family-mono);
+    font-weight: var(--hf-weight-bold);
+    font-size: var(--hf-size-sm);
+    color: var(--hf-text-dim);
+}
+.hd4-strip-label-main { color: var(--hf-accent); }
