@@ -28,6 +28,7 @@ v1 — the core switcher + mixer is built and tested:
 - **QUAD** composite, **FREEZE**, **OUTPUT FADE**, and output **VFX** (negative / mono / sepia).
 - **Audio mixer**: per-channel fader / mute / solo / meter into a main bus (fader + limiter + meter).
 - **8 memory slots** (save / recall the full state, persisted to `localStorage`).
+- **Auto-mixing + beat matching**: tap tempo / BPM, audio tempo detection (SYNC), and beat-synced auto-switching (scan or random, every N bars).
 
 Roadmap (PinP / SPLIT / KEY compositing, the full audio channel strip, auto-switching,
 MIDI, recording) and the full design rationale are in
@@ -40,7 +41,7 @@ MIDI, recording) and the full design rationale are in
 | `1`–`4` | Take that channel | `q` | QUAD |
 | `c` | CUT transition | `f` | FREEZE |
 | `d` | MIX (dissolve) | `b` | FADE to black |
-| `w` | WIPE | | |
+| `w` | WIPE | `a` | AUTO (beat-synced) |
 
 ## Develop
 

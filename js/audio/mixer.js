@@ -107,6 +107,18 @@ export class AudioMixer {
         return rms(m.meterBuf)
     }
 
+    /** Low-band (kick/bass) energy 0..1 of the main bus, for beat detection. */
+    getMainEnergy() {
+        const m = this._main
+        if (!m.analyser) return 0
+        if (!m.freqBuf) m.freqBuf = new Uint8Array(m.analyser.frequencyBinCount)
+        m.analyser.getByteFrequencyData(m.freqBuf)
+        const n = Math.min(8, m.freqBuf.length)
+        let sum = 0
+        for (let i = 0; i < n; i++) sum += m.freqBuf[i]
+        return n ? (sum / n) / 255 : 0
+    }
+
     dispose() {
         if (this._ctx) { try { this._ctx.close() } catch { /* ignore */ } this._ctx = null }
     }

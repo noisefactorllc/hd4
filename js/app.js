@@ -25,11 +25,15 @@ import { OutputState } from './outputState.js'
 import { AudioMixer } from './audio/mixer.js'
 import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
 import { attachKeyboard } from './keyboard.js'
+import { BeatClock } from './beatClock.js'
+import { AutoMix } from './autoMix.js'
+import { BeatDetector } from './beatDetect.js'
 import { buildProgramView } from './ui/programView.js'
 import { buildTransitionBar } from './ui/transitionBar.js'
 import { buildOutputBar } from './ui/outputBar.js'
 import { buildMixerPanel } from './ui/mixerPanel.js'
 import { buildMemoryBar } from './ui/memoryBar.js'
+import { buildAutoBar } from './ui/autoBar.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -111,6 +115,33 @@ async function boot() {
         onTime: (s) => switcher.setTime(s),
     })
 
+    // --- Auto-mixing + beat matching ---
+    const beatClock = new BeatClock({ bpm: 120 })
+    const autoMix = new AutoMix({ channelCount: CHANNEL_COUNT })
+    const beatDetect = new BeatDetector()
+    let matchAudio = false
+    state.beatClock = beatClock
+    state.autoMix = autoMix
+    const autoBar = buildAutoBar(document.getElementById('hd4-transition'), {
+        initialBpm: beatClock.bpm,
+        initialBars: autoMix.barsPerSwitch,
+        initialMode: autoMix.mode,
+        onToggle: () => {
+            const on = autoMix.toggle()
+            if (on) autoMix.reset(beatClock.beatIndex)
+            autoBar.setEnabled(on)
+        },
+        onTap: () => autoBar.setBpm(beatClock.tap(now())),
+        onMode: (m) => autoMix.setMode(m),
+        onBars: (n) => autoMix.setBarsPerSwitch(n),
+        onMatchAudio: () => {
+            matchAudio = !matchAudio
+            if (matchAudio) beatDetect.reset()
+            autoBar.setMatchAudio(matchAudio)
+        },
+    })
+    beatClock.start(now())
+
     // --- Multiview (source monitors) ---
     const multiview = buildMultiview(document.getElementById('hd4-sources'), state.channels, {
         onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => multiview.refresh()),
@@ -157,6 +188,11 @@ async function boot() {
         quad: () => output.toggleQuad(),
         freeze: () => output.toggleFreeze(),
         fade: () => output.toggleFade(now()),
+        auto: () => {
+            const on = autoMix.toggle()
+            if (on) autoMix.reset(beatClock.beatIndex)
+            autoBar.setEnabled(on)
+        },
     })
 
     // Default layout: a live camera, a (still-empty) file input, and two
@@ -190,6 +226,24 @@ async function boot() {
     // --- Per-frame loop ---
     const frame = (t) => {
         for (const ch of state.channels) ch.tick()
+
+        // Beat matching: optionally re-anchor the clock to the audio, then
+        // run the beat clock and let auto-mix take channels on the beat.
+        if (matchAudio && audio.enabled) {
+            const { onset, bpm } = beatDetect.push(audio.getMainEnergy(), t)
+            if (onset) {
+                beatClock.resetPhase(t)
+                if (bpm) { beatClock.setBpm(bpm); autoBar.setBpm(beatClock.bpm) }
+            }
+        }
+        for (const beat of beatClock.tick(t)) {
+            autoBar.flashBeat(beat)
+            if (autoMix.enabled) {
+                const target = autoMix.onBeat(beat, switcher.live)
+                if (target) switcher.take(target, t)
+            }
+        }
+
         const pres = switcher.tick(t)
         const out = output.tick(t)
         compositor.draw(pres, switcher.type, out)
@@ -215,6 +269,8 @@ async function boot() {
         output,
         audio,
         memory,
+        beatClock,
+        autoMix,
         get ready() { return state.ready },
         sampleChannelBrightness: (i) => brightnessOf(state.channels[i]?.canvas),
         sampleChannelAvg: (i) => avgColorOf(state.channels[i]?.canvas),

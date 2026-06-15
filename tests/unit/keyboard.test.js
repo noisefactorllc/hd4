@@ -24,10 +24,11 @@ test('c/d/w select the transition type (cut/dissolve/wipe)', () => {
     assert.deepEqual(keyToAction('w'), { type: 'transitionType', value: 'wipe' })
 })
 
-test('q/f/b toggle quad / freeze / fade-to-black', () => {
+test('q/f/b toggle quad / freeze / fade-to-black; a toggles auto', () => {
     assert.deepEqual(keyToAction('q'), { type: 'quad' })
     assert.deepEqual(keyToAction('f'), { type: 'freeze' })
     assert.deepEqual(keyToAction('b'), { type: 'fade' })
+    assert.deepEqual(keyToAction('a'), { type: 'auto' })
 })
 
 test('the mapping is case-insensitive', () => {

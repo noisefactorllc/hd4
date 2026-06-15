@@ -3,13 +3,13 @@
  * Keyboard shortcuts.
  *
  *   1–4  take that channel        c  CUT      d  MIX (dissolve)   w  WIPE
- *   q    QUAD                      f  FREEZE   b  FADE to black
+ *   q    QUAD                      f  FREEZE   b  FADE to black    a  AUTO
  *
  * keyToAction is a pure lookup; attachKeyboard wires it to the document
  * and ignores keystrokes while a field is focused.
  */
 const TRANSITION_KEYS = { c: 'cut', d: 'mix', w: 'wipe' }
-const TOGGLE_KEYS = { q: 'quad', f: 'freeze', b: 'fade' }
+const TOGGLE_KEYS = { q: 'quad', f: 'freeze', b: 'fade', a: 'auto' }
 
 export function keyToAction(key) {
     if (typeof key !== 'string') return null
