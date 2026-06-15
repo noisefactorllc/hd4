@@ -20,15 +20,17 @@
         { "imports": { "handfish": "https://handfish.noisefactor.io/0/handfish.esm.min.js" } }
     </script>
 
-    <!-- Base fonts: blanks (metrics-only, no FOIT) + the real variable fonts. -->
-    <link rel="preload" href="https://fonts.noisefactor.io/fonts/nunito/Nunito-Blank.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="https://fonts.noisefactor.io/fonts/noto-sans-mono/NotoSansMono-Blank.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="https://fonts.noisefactor.io/fonts/material-symbols-outlined/material-symbols-outlined.woff2" as="font" type="font/woff2" crossorigin>
+    <!-- Global typeface: Atkinson Hyperlegible (Braille Institute high-legibility
+         face), via fontaine. The metric-matched Blank placeholder preloads and
+         reserves exact space so the real font swaps in with zero layout shift. -->
+    <link rel="preload" href="https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Blank.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Regular.woff2" as="font" type="font/woff2" crossorigin>
     <style>
-        @font-face { font-family: 'Nunito Blank';         src: url('https://fonts.noisefactor.io/fonts/nunito/Nunito-Blank.woff2') format('woff2');                     font-weight: 100 900; font-display: block; }
-        @font-face { font-family: 'Noto Sans Mono Blank';  src: url('https://fonts.noisefactor.io/fonts/noto-sans-mono/NotoSansMono-Blank.woff2') format('woff2');       font-weight: 100 900; font-display: block; }
-        @font-face { font-family: Nunito;                  src: url('https://fonts.noisefactor.io/fonts/nunito/Nunito[wght].woff2') format('woff2');                      font-weight: 100 900; font-display: swap; }
-        @font-face { font-family: 'Noto Sans Mono';        src: url('https://fonts.noisefactor.io/fonts/noto-sans-mono/NotoSansMono[wdth,wght].woff2') format('woff2');  font-weight: 100 900; font-display: swap; }
+        @font-face { font-family: 'Atkinson Hyperlegible Blank'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Blank.woff2') format('woff2'); font-weight: 100 900; font-display: block; }
+        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Regular.woff2') format('woff2');    font-weight: 100 500; font-style: normal; font-display: swap; }
+        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Bold.woff2') format('woff2');       font-weight: 600 900; font-style: normal; font-display: swap; }
+        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Italic.woff2') format('woff2');     font-weight: 100 500; font-style: italic; font-display: swap; }
+        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-BoldItalic.woff2') format('woff2'); font-weight: 600 900; font-style: italic; font-display: swap; }
     </style>
 
     <link rel="stylesheet" href="css/hd4.css">

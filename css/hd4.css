@@ -5,6 +5,14 @@
  * the full styling pass lands in the polish phase.
  */
 
+/* Global typeface — lean fully into Atkinson Hyperlegible (fontaine), for
+   both the UI and the numeric/mono readouts. The Blank face (preloaded in
+   index.html) is the metric-matched, zero-CLS fallback. */
+:root {
+    --hf-font-family: 'Atkinson Hyperlegible', 'Atkinson Hyperlegible Blank';
+    --hf-font-family-mono: 'Atkinson Hyperlegible', 'Atkinson Hyperlegible Blank';
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -18,6 +26,7 @@ body {
     color: var(--hf-text-normal);
     background: var(--hf-bg-base);
     -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
     overflow: hidden;
 }
 
