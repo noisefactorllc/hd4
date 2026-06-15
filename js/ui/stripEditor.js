@@ -57,6 +57,7 @@ export function buildStripEditor(container, { channelCount = 4, onParam } = {}) 
         group('Gate', [
             toggleRow('GATE', 'gate'),
             rangeRow('Thresh', 'gateThreshold', -80, 0, 1, dB),
+            rangeRow('Attack', 'gateAttack', 0.5, 200, 0.5, ms),
             rangeRow('Release', 'gateRelease', 30, 5000, 10, ms),
         ]),
         group('Compressor', [

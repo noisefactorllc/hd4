@@ -26,6 +26,11 @@ test('the EQ button opens the editor and controls drive the strip params', async
     await page.dispatchEvent('.hd4-se-slider[data-key="pan"]', 'input')
     expect(await page.evaluate(() => window.__hd4.audio.stripParam(0, 'pan'))).toBeLessThan(-0.5)
 
+    // The gate Attack control drives the (newly exposed) gateAttack param.
+    await page.fill('.hd4-se-slider[data-key="gateAttack"]', '120')
+    await page.dispatchEvent('.hd4-se-slider[data-key="gateAttack"]', 'input')
+    expect(await page.evaluate(() => window.__hd4.audio.stripParam(0, 'gateAttack'))).toBe(120)
+
     // Switching tabs retargets the editor to another channel.
     await page.click('.hd4-stripedit-tab >> nth=1')
     await expect(page.locator('.hd4-stripedit-overlay--chan .hd4-stripedit-title')).toHaveText('Channel 2 audio')

@@ -31,7 +31,7 @@ const RANGES = {
     eqHi: [-15, 15], eqHiFreq: [1000, 20000],
     eqMid: [-15, 15], eqMidFreq: [20, 20000], eqMidQ: [0.5, 16],
     eqLo: [-15, 15], eqLoFreq: [20, 500],
-    gateThreshold: [-80, 0], gateRelease: [30, 5000],
+    gateThreshold: [-80, 0], gateAttack: [0.5, 200], gateRelease: [30, 5000],
     compThreshold: [-60, 0], compAttack: [0.2, 100], compRelease: [30, 5000], compMakeup: [-40, 40],
     pan: [-1, 1], delay: [0, 500],
     auxSend: [-Infinity, 10], revSend: [-Infinity, 10],
@@ -56,7 +56,7 @@ export const STRIP_DEFAULTS = Object.freeze({
     eqHi: 0, eqHiFreq: 10000,
     eqMid: 0, eqMidFreq: 500, eqMidQ: 1,
     eqLo: 0, eqLoFreq: 100,
-    gate: false, gateThreshold: -50, gateRelease: 860,
+    gate: false, gateThreshold: -50, gateAttack: 10, gateRelease: 860,
     comp: false, compThreshold: -30, compRatio: 2, compAttack: 1, compRelease: 380, compMakeup: 0, compAutoGain: false,
     pan: 0, delay: 0,
     auxSend: 0, revSend: -60, // -60 dB ≈ off (kept finite so state serializes)

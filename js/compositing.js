@@ -49,13 +49,25 @@ export function pinpInsetRect({ size = '1/4', hPosition = 0, vPosition = 0, aspe
     return { x, y, w, h }
 }
 
+/** Source/program aspect ratio — channels and output are both 16:9. */
+const SOURCE_AR = 16 / 9
+
 /**
  * The source sub-rectangle (fractions 0..1) shown inside the inset — a zoom
  * window panned by the view position. cropping 1..100 %, view -50..50.
+ *
+ * A non-16:9 inset (e.g. 1:1) first cover-crops the 16:9 source to the inset
+ * aspect so it shows an undistorted, centred region instead of squashing the
+ * whole frame into the shape; the user crop (zoom) then applies within that.
  */
-export function pinpSourceCrop({ hCropping = 100, vCropping = 100, hViewPosition = 0, vViewPosition = 0 } = {}) {
-    const sw = clamp(hCropping / 100, 0.01, 1)
-    const sh = clamp(vCropping / 100, 0.01, 1)
+export function pinpSourceCrop({ hCropping = 100, vCropping = 100, hViewPosition = 0, vViewPosition = 0, aspect = '16:9' } = {}) {
+    const insetAR = aspect === '1:1' ? 1 : SOURCE_AR
+    let baseW = 1
+    let baseH = 1
+    if (insetAR < SOURCE_AR) baseW = insetAR / SOURCE_AR
+    else if (insetAR > SOURCE_AR) baseH = SOURCE_AR / insetAR
+    const sw = clamp(baseW * (hCropping / 100), 0.01, 1)
+    const sh = clamp(baseH * (vCropping / 100), 0.01, 1)
     return {
         sx: fromCentered(hViewPosition) * (1 - sw),
         sy: fromCentered(vViewPosition) * (1 - sh),

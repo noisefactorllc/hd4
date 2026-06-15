@@ -72,3 +72,15 @@ test('gateStep opens quickly and closes over the release time', () => {
     // opening rises toward 1 (10ms attack → full in one 10ms+ step)
     assert.equal(gateStep(0, true, 20, 1000), 1)
 })
+
+test('gateStep honours a slower attack time (gradual open)', () => {
+    // 20ms elapsed of a 200ms attack → rises by 0.1, not instant.
+    assert.ok(Math.abs(gateStep(0, true, 20, 1000, 200) - 0.1) < 1e-9)
+})
+
+test('gateAttack is a clamped strip parameter (default 10 ms)', () => {
+    assert.equal(STRIP_DEFAULTS.gateAttack, 10)
+    assert.equal(clampStripParam('gateAttack', 50), 50)
+    assert.equal(clampStripParam('gateAttack', 9999), 200) // clamp to max
+    assert.equal(clampStripParam('gateAttack', 0), 0.5) // clamp to min
+})

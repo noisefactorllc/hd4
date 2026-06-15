@@ -255,11 +255,13 @@ async function boot() {
         })
     }
 
-    // --- Recording (program canvas + main-bus audio → file) ---
+    // --- Recording (program canvas + main/AUX audio → file) ---
+    let recordSource = 'program' // 'program' (main bus) | 'aux' (AUX mix)
     const buildRecordStream = () => {
         const stream = programView.canvas.captureStream(30)
         try {
-            for (const track of audio.getOutputStream().getAudioTracks()) stream.addTrack(track)
+            const bus = recordSource === 'aux' ? audio.getAuxStream() : audio.getOutputStream()
+            for (const track of bus.getAudioTracks()) stream.addTrack(track)
         } catch (e) { console.warn('[hd4] recording without audio', e?.message || e) }
         return stream
     }
@@ -287,6 +289,8 @@ async function boot() {
         onAudioSource: (i, mode, deviceId) => audio.setChannelAudioMode(i, mode, deviceId).then(refreshAudioInputs),
         onEditStrip: (i) => { audio.ensureContext(); stripEditor.open(i, audio.stripParams(i)) },
         onEditMain: () => { audio.ensureContext(); mainBusEditor.open(audio.mainParams()) },
+        onMonitor: (which) => { audio.setMonitor(which) }, // audition AUX vs MAIN
+        onRecordSource: (src) => { recordSource = src }, // REC captures PGM vs AUX
     })
 
     // --- Audio editors: per-channel strip + main bus ---
@@ -500,6 +504,7 @@ async function boot() {
         audio.tickDynamics(t)
         for (let i = 0; i < CHANNEL_COUNT; i++) mixerPanel.setMeter(i, audio.getMeter(i))
         mixerPanel.setMainMeter(audio.getMainMeter())
+        mixerPanel.setAuxMeter(audio.getAuxLevel())
         _rafId = requestAnimationFrame(frame)
     }
     _rafId = requestAnimationFrame(frame)
@@ -521,6 +526,7 @@ async function boot() {
         still: stillStore,
         captureStill,
         recorder,
+        get recordSource() { return recordSource },
         userButtons,
         midi: { map: midiMap, simulate: (bytes) => onMidi(bytes) },
         get lastRecording() { return state.lastRecording || null },

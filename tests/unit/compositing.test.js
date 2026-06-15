@@ -67,6 +67,32 @@ test('PinP 50% horizontal crop is centered by default and pans with view positio
     assert.equal(right.sx, 0.5)
 })
 
+test('PinP 1:1 inset centre-crops a 16:9 source to a square (no vertical squash)', () => {
+    const c = pinpSourceCrop({ aspect: '1:1', hCropping: 100, vCropping: 100, hViewPosition: 0, vViewPosition: 0 })
+    // The cropped region must be square in source pixels (the source is 16:9),
+    // so drawing it into a square inset is undistorted.
+    const sourceAR = 16 / 9
+    const regionAR = (c.sw * sourceAR) / c.sh
+    assert.ok(Math.abs(regionAR - 1) < 1e-9, `expected a square source region, got AR ${regionAR}`)
+    assert.equal(c.sh, 1) // full height
+    assert.ok(Math.abs(c.sw - 9 / 16) < 1e-9) // crop the wide sides
+    assert.ok(Math.abs(c.sx - (1 - c.sw) / 2) < 1e-9) // centred horizontally
+    assert.equal(c.sy, 0)
+})
+
+test('PinP 16:9 inset leaves the source uncropped (matches the program AR)', () => {
+    assert.deepEqual(
+        pinpSourceCrop({ aspect: '16:9', hCropping: 100, vCropping: 100, hViewPosition: 0, vViewPosition: 0 }),
+        { sx: 0, sy: 0, sw: 1, sh: 1 },
+    )
+})
+
+test('PinP user cropping zooms within the aspect-corrected square', () => {
+    const c = pinpSourceCrop({ aspect: '1:1', hCropping: 50, vCropping: 100, hViewPosition: 0, vViewPosition: 0 })
+    assert.ok(Math.abs(c.sw - (9 / 16) * 0.5) < 1e-9) // 50% zoom on the square base
+    assert.equal(c.sh, 1)
+})
+
 // --- SPLIT layouts ----------------------------------------------------------
 
 test('V.STRETCH splits into left/right halves filling each region', () => {

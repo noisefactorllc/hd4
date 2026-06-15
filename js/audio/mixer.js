@@ -16,6 +16,10 @@ import { dbToGain, gateStep, clampStripParam, STRIP_DEFAULTS } from './strip.js'
 import { MAIN_DEFAULTS, clampMainParam, reverbIRParams } from './mainBus.js'
 import { autoMixGains } from './autoAudio.js'
 
+// Short glide for continuous controls (pan / sends) so fast drags don't
+// "zipper" (audible stepping from abrupt .value jumps). ~30 ms to settle.
+const SMOOTH_TC = 0.01
+
 export class AudioMixer {
     constructor({ channelCount = 4 } = {}) {
         this.channelCount = channelCount
@@ -57,7 +61,8 @@ export class AudioMixer {
         this._mbOn = false
         this._revCache = { time: null, type: null }
         this._aux = null // AUX bus sum (channels' AUX sends land here)
-        this._auxChain = null // { delay, level, mute, streamDest }
+        this._auxChain = null // { delay, level, mute, analyser, meterBuf, streamDest }
+        this._monitor = 'main' // what the speakers hear: 'main' | 'aux'
         this._reverb = null // { busGain, convolver, returnGain }
         this._lastDyn = null
         this._liveChannel = 1 // for audio-follows-video ducking
@@ -217,7 +222,7 @@ export class AudioMixer {
                 } else {
                     const dbfs = level > 0 ? 20 * Math.log10(level) : -Infinity
                     const open = dbfs > strip.params.gateThreshold
-                    strip.gateNode.gain.value = gateStep(strip.gateNode.gain.value, open, dt, strip.params.gateRelease)
+                    strip.gateNode.gain.value = gateStep(strip.gateNode.gain.value, open, dt, strip.params.gateRelease, strip.params.gateAttack)
                 }
             }
             return level
@@ -328,13 +333,19 @@ export class AudioMixer {
             mbInput, mbOutput, mb,
         })
 
-        // AUX bus: sum → delay → level → mute → (stream tap, lazy).
+        // AUX bus: sum → delay → level → mute → analyser (meter) + (stream tap, lazy).
         this._aux = ctx.createGain()
         const auxDelay = ctx.createDelay(0.5)
         const auxLevel = ctx.createGain()
         const auxMute = ctx.createGain()
+        const auxAnalyser = ctx.createAnalyser(); auxAnalyser.fftSize = 512
         this._aux.connect(auxDelay); auxDelay.connect(auxLevel); auxLevel.connect(auxMute)
-        this._auxChain = { delay: auxDelay, level: auxLevel, mute: auxMute, streamDest: null }
+        auxMute.connect(auxAnalyser)
+        this._auxChain = {
+            delay: auxDelay, level: auxLevel, mute: auxMute,
+            analyser: auxAnalyser, meterBuf: new Float32Array(auxAnalyser.fftSize),
+            streamDest: null,
+        }
 
         // Reverb bus: send → busGain → convolver → returnGain → main.
         const revBus = ctx.createGain()
@@ -405,7 +416,7 @@ export class AudioMixer {
         }
         m.muteGain.gain.value = p.mainMute ? 0 : 1
         // Reverb return + (re)generate the impulse when time/type change.
-        this._reverb.returnGain.gain.value = dbToGain(p.reverbReturn)
+        this._ramp(this._reverb.returnGain.gain, dbToGain(p.reverbReturn))
         if (this._revCache.time !== p.reverbTime || this._revCache.type !== p.reverbType) {
             const rev = reverbIRParams(p.reverbType, p.reverbTime)
             this._reverb.convolver.buffer = makeImpulse(this._ctx, rev.seconds, rev.decay)
@@ -419,9 +430,9 @@ export class AudioMixer {
             band.comp.ratio.value = Number.isFinite(ratio) ? Math.min(20, ratio) : 20
         }
         this._setMbComp(p.mbComp)
-        // AUX bus.
+        // AUX bus (level glides; mute stays snappy/exact).
         this._auxChain.delay.delayTime.value = p.auxDelay / 1000
-        this._auxChain.level.gain.value = dbToGain(p.auxLevel)
+        this._ramp(this._auxChain.level.gain, dbToGain(p.auxLevel))
         this._auxChain.mute.gain.value = p.auxMute ? 0 : 1
     }
 
@@ -457,6 +468,44 @@ export class AudioMixer {
         return this._auxChain.streamDest.stream
     }
 
+    /** Post-fader RMS of the AUX bus (for the AUX meter). */
+    getAuxLevel() {
+        const a = this._auxChain?.analyser
+        if (!a) return 0
+        a.getFloatTimeDomainData(this._auxChain.meterBuf)
+        return rms(this._auxChain.meterBuf)
+    }
+
+    /** Route the monitor (speaker) output to MAIN or AUX. The program/record
+     *  taps (mainAnalyser/aux streamDest) are separate, so auditioning AUX
+     *  never alters what is output or recorded. */
+    setMonitor(which) {
+        const next = which === 'aux' ? 'aux' : 'main'
+        this._monitor = next
+        this.ensureContext()
+        const ctx = this._ctx
+        const main = this._main.analyser
+        const aux = this._auxChain?.mute
+        if (!ctx || !main || !aux) return next
+        try { main.disconnect(ctx.destination) } catch { /* was not connected */ }
+        try { aux.disconnect(ctx.destination) } catch { /* was not connected */ }
+        if (next === 'aux') aux.connect(ctx.destination)
+        else main.connect(ctx.destination)
+        return next
+    }
+
+    monitorSource() { return this._monitor }
+
+    /** Glide an AudioParam toward a value (de-zipper), or set it directly if
+     *  there is no context clock yet. */
+    _ramp(param, value) {
+        if (this._ctx && typeof param.setTargetAtTime === 'function') {
+            param.setTargetAtTime(value, this._ctx.currentTime, SMOOTH_TC)
+        } else {
+            param.value = value
+        }
+    }
+
     /** Push a strip's processing parameters onto its WebAudio nodes. */
     _applyStrip(strip) {
         const p = strip.params
@@ -478,9 +527,10 @@ export class AudioMixer {
             strip.makeup.gain.value = 1
         }
         strip.delayNode.delayTime.value = p.delay / 1000
-        strip.panner.pan.value = p.pan
-        strip.auxSend.gain.value = dbToGain(p.auxSend)
-        strip.revSend.gain.value = dbToGain(p.revSend)
+        // Continuous controls glide to avoid zipper noise on fast drags.
+        this._ramp(strip.panner.pan, p.pan)
+        this._ramp(strip.auxSend.gain, dbToGain(p.auxSend))
+        this._ramp(strip.revSend.gain, dbToGain(p.revSend))
     }
 
     _recompute() {

@@ -16,6 +16,8 @@ export function buildMixerPanel(container, {
     onAudioSource,
     onEditStrip,
     onEditMain,
+    onMonitor,
+    onRecordSource,
 } = {}) {
     container.innerHTML = ''
     const panel = document.createElement('div')
@@ -29,11 +31,14 @@ export function buildMixerPanel(container, {
     }
     const main = buildMainStrip(initialMainFader, onMainFader, onEditMain)
     panel.appendChild(main.el)
+    const aux = buildAuxModule({ onMonitor, onRecordSource })
+    panel.appendChild(aux.el)
     container.appendChild(panel)
 
     return {
         setMeter(i, v) { strips[i].setMeter(v) },
         setMainMeter(v) { main.setMeter(v) },
+        setAuxMeter(v) { aux.setMeter(v) },
         setMuted(i, on) { strips[i].setMuted(on) },
         setSoloed(i, on) { strips[i].setSoloed(on) },
         setFader(i, pos) { strips[i].setFader(pos) },
@@ -148,6 +153,68 @@ function buildMainStrip(fader, onMainFader, onEditMain) {
         el,
         setMeter(v) { fill.style.height = meterHeight(v) },
         setFader(pos) { range.value = String(pos) },
+    }
+}
+
+/**
+ * AUX module — routes the separate AUX mix. MON auditions it on the speakers
+ * (vs MAIN); REC selects it as the recording source (PGM ↔ AUX). The meter
+ * shows the AUX bus level (fed by each channel's AUX send). The bus level /
+ * delay / mute themselves live in the main-bus editor.
+ */
+function buildAuxModule({ onMonitor, onRecordSource }) {
+    const el = document.createElement('div')
+    el.className = 'hd4-strip hd4-aux'
+
+    const btns = document.createElement('div')
+    btns.className = 'hd4-strip-btns hd4-aux-btns'
+
+    let monitoring = false
+    const mon = document.createElement('button')
+    mon.type = 'button'
+    mon.className = 'hd4-strip-btn hd4-aux-mon'
+    mon.textContent = 'MON'
+    mon.title = 'Monitor (audition) the AUX bus on the speakers'
+    mon.setAttribute('aria-label', 'Monitor the AUX bus')
+    mon.addEventListener('click', () => {
+        monitoring = !monitoring
+        mon.classList.toggle('is-active', monitoring)
+        onMonitor?.(monitoring ? 'aux' : 'main')
+    })
+
+    let toAux = false
+    const rec = document.createElement('button')
+    rec.type = 'button'
+    rec.className = 'hd4-strip-btn hd4-aux-recsrc'
+    rec.title = 'Recording source: program (PGM) or the AUX mix'
+    rec.setAttribute('aria-label', 'Recording source')
+    const renderRec = () => { rec.textContent = toAux ? 'AUX' : 'PGM'; rec.classList.toggle('is-active', toAux) }
+    renderRec()
+    rec.addEventListener('click', () => {
+        toAux = !toAux
+        renderRec()
+        onRecordSource?.(toAux ? 'aux' : 'program')
+    })
+
+    btns.append(mon, rec)
+
+    const faderRow = document.createElement('div')
+    faderRow.className = 'hd4-strip-fader-row'
+    const meter = document.createElement('div')
+    meter.className = 'hd4-meter'
+    const fill = document.createElement('div')
+    fill.className = 'hd4-meter-fill'
+    meter.appendChild(fill)
+    faderRow.appendChild(meter)
+
+    const label = document.createElement('div')
+    label.className = 'hd4-strip-label hd4-strip-label-aux'
+    label.textContent = 'AUX'
+
+    el.append(btns, faderRow, label)
+    return {
+        el,
+        setMeter(v) { fill.style.height = meterHeight(v) },
     }
 }
 
