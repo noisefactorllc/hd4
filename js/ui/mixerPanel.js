@@ -13,6 +13,7 @@ export function buildMixerPanel(container, {
     onMute,
     onSolo,
     onMainFader,
+    onAudioSource,
 } = {}) {
     container.innerHTML = ''
     const panel = document.createElement('div')
@@ -20,7 +21,7 @@ export function buildMixerPanel(container, {
 
     const strips = []
     for (let i = 0; i < channelCount; i++) {
-        const strip = buildStrip(i, initialFaders[i] ?? 0.8, { onFader, onMute, onSolo })
+        const strip = buildStrip(i, initialFaders[i] ?? 0.8, { onFader, onMute, onSolo, onAudioSource })
         panel.appendChild(strip.el)
         strips.push(strip)
     }
@@ -35,6 +36,7 @@ export function buildMixerPanel(container, {
         setSoloed(i, on) { strips[i].setSoloed(on) },
         setFader(i, pos) { strips[i].setFader(pos) },
         setMainFader(pos) { main.setFader(pos) },
+        setAudioInputs(list) { strips.forEach((s) => s.setAudioInputs(list)) },
     }
 }
 
@@ -42,10 +44,12 @@ function meterHeight(v) {
     return `${Math.min(100, Math.sqrt(Math.max(0, v)) * 120).toFixed(1)}%`
 }
 
-function buildStrip(index, fader, { onFader, onMute, onSolo }) {
+function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource }) {
     const el = document.createElement('div')
     el.className = 'hd4-strip'
     el.dataset.channel = String(index + 1)
+
+    const audio = buildAudioSelect(index, onAudioSource)
 
     const btns = document.createElement('div')
     btns.className = 'hd4-strip-btns'
@@ -67,14 +71,51 @@ function buildStrip(index, fader, { onFader, onMute, onSolo }) {
     label.className = 'hd4-strip-label'
     label.textContent = String(index + 1)
 
-    el.append(btns, faderRow, label)
+    el.append(audio.el, btns, faderRow, label)
     return {
         el,
         setMeter(v) { fill.style.height = meterHeight(v) },
         setMuted(on) { mute.classList.toggle('is-active', on) },
         setSoloed(on) { solo.classList.toggle('is-active', on) },
         setFader(pos) { range.value = String(pos) },
+        setAudioInputs(list) { audio.updateDevices(list) },
     }
+}
+
+/** Per-channel audio source: Follow video / None / a specific input device. */
+function buildAudioSelect(index, onAudioSource) {
+    const el = document.createElement('select')
+    el.className = 'hd4-strip-audio'
+    el.title = 'Audio source'
+    el.setAttribute('aria-label', `Channel ${index + 1} audio source`)
+
+    const rebuild = (devices = []) => {
+        const prev = el.value
+        el.textContent = ''
+        for (const [value, text] of [['follow', 'Follow'], ['none', 'No audio']]) {
+            const o = document.createElement('option')
+            o.value = value
+            o.textContent = text
+            el.appendChild(o)
+        }
+        for (const dev of devices) {
+            const o = document.createElement('option')
+            o.value = `device:${dev.deviceId}`
+            o.textContent = dev.label
+            el.appendChild(o)
+        }
+        if ([...el.options].some((o) => o.value === prev)) el.value = prev
+    }
+    rebuild()
+
+    el.addEventListener('change', () => {
+        const v = el.value
+        if (v === 'follow') onAudioSource?.(index, 'follow')
+        else if (v === 'none') onAudioSource?.(index, 'none')
+        else if (v.startsWith('device:')) onAudioSource?.(index, 'device', v.slice(7))
+    })
+
+    return { el, updateDevices: rebuild }
 }
 
 function buildMainStrip(fader, onMainFader) {

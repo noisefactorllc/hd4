@@ -23,8 +23,13 @@ export class AudioMixer {
             soloed: false,
             gainNode: null,
             analyser: null,
-            sourceNode: null,
             meterBuf: null,
+            audioMode: 'follow', // 'follow' (video's audio) | 'device' | 'none'
+            deviceId: '',
+            followSource: null, // audio from the channel's video media
+            deviceSource: null, // an independently-selected input device
+            deviceStream: null,
+            activeSource: null, // whichever is currently wired to the gain
         }))
         this._main = { fader: 0.9, gainNode: null, limiter: null, analyser: null, meterBuf: null }
     }
@@ -47,35 +52,89 @@ export class AudioMixer {
         }
     }
 
-    /** Connect a MediaStream's audio (camera/mic) into a channel. */
+    /** The channel's video-following audio (camera mic). Used in 'follow' mode. */
     async connectStream(index, stream) {
         await this.resume()
         const strip = this._strips[index]
-        this.disconnectChannel(index)
+        this._clearFollow(strip)
         if (!stream?.getAudioTracks || stream.getAudioTracks().length === 0) return
-        const node = this._ctx.createMediaStreamSource(stream)
-        node.connect(strip.gainNode)
-        strip.sourceNode = node
+        strip.followSource = this._ctx.createMediaStreamSource(stream)
+        this._applyActive(strip)
     }
 
-    /** Connect a media element's audio (a video file) into a channel. */
+    /** The channel's video-following audio (a video file). Used in 'follow' mode. */
     async connectElement(index, el) {
         await this.resume()
         const strip = this._strips[index]
-        this.disconnectChannel(index)
+        this._clearFollow(strip)
         // A MediaElementSource can only be created once per element; cache it.
         let node = el._hd4MediaSource
         if (!node) { node = this._ctx.createMediaElementSource(el); el._hd4MediaSource = node }
-        node.connect(strip.gainNode)
-        strip.sourceNode = node
+        strip.followSource = node
+        this._applyActive(strip)
     }
 
+    /** Media driver teardown — release a channel's follow source. */
     disconnectChannel(index) {
+        this._clearFollow(this._strips[index])
+    }
+
+    /**
+     * Select a channel's audio source independent of its video:
+     *   'follow' — the video's audio (default), 'none' — silent,
+     *   'device' — an independent input (deviceId; '' = system default).
+     */
+    async setChannelAudioMode(index, mode, deviceId = '') {
         const strip = this._strips[index]
-        if (strip.sourceNode) {
-            try { strip.sourceNode.disconnect() } catch { /* ignore */ }
-            strip.sourceNode = null
+        this.ensureContext()
+        this._clearDevice(strip)
+        strip.audioMode = mode
+        strip.deviceId = mode === 'device' ? deviceId : ''
+        if (mode === 'device') {
+            await this.resume()
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+                })
+                strip.deviceStream = stream
+                strip.deviceSource = this._ctx.createMediaStreamSource(stream)
+            } catch {
+                strip.audioMode = 'none'
+            }
         }
+        this._applyActive(strip)
+    }
+
+    channelAudioMode(index) { return this._strips[index].audioMode }
+    channelAudioDeviceId(index) { return this._strips[index].deviceId }
+
+    _clearFollow(strip) {
+        if (!strip.followSource) return
+        try { strip.followSource.disconnect() } catch { /* ignore */ }
+        if (strip.activeSource === strip.followSource) strip.activeSource = null
+        strip.followSource = null
+    }
+
+    _clearDevice(strip) {
+        if (strip.deviceSource) {
+            try { strip.deviceSource.disconnect() } catch { /* ignore */ }
+            if (strip.activeSource === strip.deviceSource) strip.activeSource = null
+            strip.deviceSource = null
+        }
+        if (strip.deviceStream) {
+            for (const t of strip.deviceStream.getTracks()) { try { t.stop() } catch { /* ignore */ } }
+            strip.deviceStream = null
+        }
+    }
+
+    _applyActive(strip) {
+        const want = strip.audioMode === 'device' ? strip.deviceSource
+            : strip.audioMode === 'follow' ? strip.followSource
+                : null
+        if (strip.activeSource === want) return
+        if (strip.activeSource) { try { strip.activeSource.disconnect(strip.gainNode) } catch { /* ignore */ } }
+        if (want && strip.gainNode) { want.connect(strip.gainNode); strip.activeSource = want }
+        else strip.activeSource = null
     }
 
     setFader(index, position) { this._strips[index].fader = position; this._recompute() }
@@ -120,6 +179,7 @@ export class AudioMixer {
     }
 
     dispose() {
+        for (const strip of this._strips) this._clearDevice(strip)
         if (this._ctx) { try { this._ctx.close() } catch { /* ignore */ } this._ctx = null }
     }
 

@@ -28,7 +28,8 @@ v1 — the core switcher + mixer is built and tested:
 - **Settings** drawer: output resolution, theme, output-fade time, beat sensitivity.
 - **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**.
 - **QUAD** composite, **FREEZE**, **OUTPUT FADE**, and output **VFX** (negative / mono / sepia).
-- **Audio mixer**: per-channel fader / mute / solo / meter into a main bus (fader + limiter + meter).
+- **Audio mixer**: per-channel fader / mute / solo / meter into a main bus (fader + limiter + meter);
+  each channel's audio source is independently selectable — **follow the video, none, or a specific input device**.
 - **8 memory slots** (save / recall the full state, persisted to `localStorage`).
 - **Auto-mixing + beat matching**: tap tempo / BPM, audio tempo detection (SYNC), and beat-synced auto-switching (scan or random, every N bars).
 

@@ -737,3 +737,18 @@ body {
     background: var(--hf-green);
     border-color: var(--hf-green);
 }
+
+/* Per-channel audio source selector (mixer strip) */
+.hd4-strip-audio {
+    width: 3.6rem;
+    max-width: 3.6rem;
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-xs);
+    color: var(--hf-text-dim);
+    background: var(--hf-bg-surface);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: 1px 2px;
+    cursor: pointer;
+}
+.hd4-strip-audio:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }

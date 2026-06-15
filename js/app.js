@@ -19,6 +19,7 @@ import { makeChannelDriverFactory } from './sources/driverFactory.js'
 import { createSource } from './sources/sourceModel.js'
 import { presetByName } from './sources/presets.js'
 import { listCameras } from './sources/cameras.js'
+import { listAudioInputs } from './audioDevices.js'
 import { buildMultiview } from './ui/multiview.js'
 import { Switcher } from './switcher.js'
 import { ProgramCompositor } from './programCompositor.js'
@@ -193,7 +194,12 @@ async function boot() {
         onMute: (i) => mixerPanel.setMuted(i, audio.toggleMute(i)),
         onSolo: (i) => mixerPanel.setSoloed(i, audio.toggleSolo(i)),
         onMainFader: (pos) => audio.setMainFader(pos),
+        onAudioSource: (i, mode, deviceId) => audio.setChannelAudioMode(i, mode, deviceId).then(refreshAudioInputs),
     })
+    const refreshAudioInputs = async () => { mixerPanel.setAudioInputs(await listAudioInputs()) }
+    if (navigator.mediaDevices?.addEventListener) {
+        navigator.mediaDevices.addEventListener('devicechange', refreshAudioInputs)
+    }
 
     // --- Memory (8-slot save/recall) ---
     const memory = new MemoryStore(window.localStorage)
@@ -249,6 +255,7 @@ async function boot() {
     ))
     multiview.refresh()
     refreshCameras() // default camera (ch1) has granted permission → labels available
+    refreshAudioInputs()
 
     // Unlock audio on the first user gesture (autoplay policy) so the
     // default camera's audio starts flowing once the user interacts.
