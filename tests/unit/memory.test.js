@@ -43,6 +43,15 @@ test('MemoryStore round-trips a snapshot through injected storage', () => {
     assert.deepEqual(store.load(2), snap)
 })
 
+test('MemoryStore preserves Infinity / -Infinity across save+load (JSON would lose them)', () => {
+    const store = new MemoryStore(fakeStorage())
+    // e.g. comp ratio INF:1 and an audio send turned fully off (-Infinity).
+    store.save(1, { audio: { channels: [{ strip: { compRatio: Infinity, auxSend: -Infinity } }] } })
+    const r = store.load(1)
+    assert.equal(r.audio.channels[0].strip.compRatio, Infinity)
+    assert.equal(r.audio.channels[0].strip.auxSend, -Infinity)
+})
+
 test('loading an empty slot returns null; has() reflects occupancy', () => {
     const store = new MemoryStore(fakeStorage())
     assert.equal(store.load(5), null)
@@ -137,4 +146,30 @@ test('applySnapshot drives the live modules with the saved values', () => {
 
 test('applySnapshot tolerates a null/empty snapshot', () => {
     assert.doesNotThrow(() => applySnapshot(null, {}))
+})
+
+test('applySnapshot applies a legacy v1 snapshot (no composition/strip/mainBus)', () => {
+    const calls = []
+    const modules = {
+        channels: [{ restore: () => calls.push('restore') }],
+        switcher: { setType: () => {}, setTime: () => {}, cut: () => {} },
+        output: { setVfx: () => {} },
+        compositor: { restore: () => calls.push('comp') },
+        audio: {
+            setFader: () => {}, setMute: () => {}, setSolo: () => {}, setMainFader: () => {},
+            setStripParams: () => calls.push('strip'), setMainParams: () => calls.push('main'),
+        },
+    }
+    const legacy = {
+        version: 1,
+        channels: [{ type: 'shader' }],
+        switcher: { live: 1, type: 'mix', time: 1 },
+        output: { vfx: 'none' },
+        audio: { channels: [{ fader: 0.5, muted: false, soloed: false }], main: 0.8 },
+    }
+    assert.doesNotThrow(() => applySnapshot(legacy, modules))
+    assert.ok(calls.includes('restore')) // v1 fields applied
+    assert.ok(!calls.includes('comp')) // no composition in a legacy snapshot
+    assert.ok(!calls.includes('strip'))
+    assert.ok(!calls.includes('main'))
 })

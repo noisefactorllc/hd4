@@ -88,7 +88,13 @@ export class CompositorState {
         return k
     }
 
-    toggleKey() { this.key.on = !this.key.on; return this.key.on }
+    toggleKey() {
+        this.key.on = !this.key.on
+        // Arming with no source selected would draw nothing; pick CH1 so the
+        // KEY toggle (button / k-key) is visibly meaningful.
+        if (this.key.on && !this.key.sourceCh) this.key.sourceCh = 1
+        return this.key.on
+    }
 
     /** An independent plain-object copy for the compositor / memory. */
     snapshot() {

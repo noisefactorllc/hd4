@@ -164,6 +164,7 @@ export class ProgramCompositor {
             ctx.save()
             shapePath(ctx, pinp.shape, rect)
             ctx.lineWidth = pinp.borderWidth
+            ctx.lineJoin = 'round' // avoid miter spikes on diamond/heart corners
             ctx.strokeStyle = BORDER_COLORS[pinp.borderColor] || '#fff'
             ctx.stroke()
             ctx.restore()

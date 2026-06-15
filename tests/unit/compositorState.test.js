@@ -74,6 +74,18 @@ test('setKey merges + clamps; toggleKey flips on', () => {
     assert.equal(c.snapshot().key.on, true)
 })
 
+test('toggleKey defaults the source to CH1 when armed with no source (so it is visible)', () => {
+    const c = new CompositorState()
+    assert.equal(c.snapshot().key.sourceCh, 0) // default OFF
+    c.toggleKey() // arm
+    assert.equal(c.snapshot().key.on, true)
+    assert.equal(c.snapshot().key.sourceCh, 1) // auto-picks a source so KEY actually shows
+    c.setKey({ sourceCh: 3 })
+    c.toggleKey() // off
+    c.toggleKey() // on again — keeps the chosen source
+    assert.equal(c.snapshot().key.sourceCh, 3)
+})
+
 test('snapshot returns an independent copy (mutation does not leak back)', () => {
     const c = new CompositorState()
     const s = c.snapshot()

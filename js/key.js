@@ -31,31 +31,53 @@ export const KEY_DEFAULTS = {
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 
-/** Opacity 0..255 for one pixel under the key configuration. */
-export function keyAlpha(r, g, b, cfg = KEY_DEFAULTS) {
+/** Soft-threshold response: foreground (low keyness) opaque, key colour cut. */
+function alphaFromKeyness(m, threshold, band) {
+    return Math.round(clamp((threshold + band - m) / (2 * band), 0, 1) * 255)
+}
+
+/** The configuration constants (threshold + band) for a key config. */
+function keyConstants(cfg) {
     const level = cfg.level ?? KEY_DEFAULTS.level
     const gain = cfg.gain ?? KEY_DEFAULTS.gain
     const band = Math.max(1, (gain / 255) * 96)
-
-    let m
-    let T
-    if (cfg.type === 'luma') {
-        const y = 0.299 * r + 0.587 * g + 0.114 * b
-        m = cfg.lumaColor === 'black' ? 255 - y : y
-        T = 220 - (level / 255) * 180
-    } else {
-        m = cfg.chromaColor === 'blue' ? b - Math.max(r, g) : g - Math.max(r, b)
-        T = 120 - (level / 255) * 160
+    const luma = cfg.type === 'luma'
+    return {
+        band,
+        luma,
+        blue: cfg.chromaColor === 'blue',
+        black: cfg.lumaColor === 'black',
+        threshold: luma ? 220 - (level / 255) * 180 : 120 - (level / 255) * 160,
     }
-    const alpha = clamp((T + band - m) / (2 * band), 0, 1)
-    return Math.round(alpha * 255)
 }
 
-/** Apply the key over an ImageData-shaped buffer in place (sets the A byte). */
+/** Keyness m for one pixel given the (precomputed) config flags. */
+function keyness(r, g, b, k) {
+    if (k.luma) {
+        const y = 0.299 * r + 0.587 * g + 0.114 * b
+        return k.black ? 255 - y : y
+    }
+    return k.blue ? b - Math.max(r, g) : g - Math.max(r, b)
+}
+
+/** Opacity 0..255 for one pixel under the key configuration. */
+export function keyAlpha(r, g, b, cfg = KEY_DEFAULTS) {
+    const k = keyConstants(cfg)
+    return alphaFromKeyness(keyness(r, g, b, k), k.threshold, k.band)
+}
+
+/**
+ * Apply the key over an ImageData-shaped buffer in place (sets the A byte).
+ * The config constants are computed once and the inner loop only does the
+ * per-pixel keyness — this runs over ~1M pixels per frame, so the hoist
+ * matters.
+ */
 export function applyKey(imageData, cfg = KEY_DEFAULTS) {
     const d = imageData.data
+    const k = keyConstants(cfg)
+    const { threshold, band } = k
     for (let i = 0; i < d.length; i += 4) {
-        d[i + 3] = keyAlpha(d[i], d[i + 1], d[i + 2], cfg)
+        d[i + 3] = alphaFromKeyness(keyness(d[i], d[i + 1], d[i + 2], k), threshold, band)
     }
     return imageData
 }

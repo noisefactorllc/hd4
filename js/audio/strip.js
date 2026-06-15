@@ -14,9 +14,9 @@ export function dbToGain(db) {
 /** Compressor ratio ladder (…:1), INF as Infinity. */
 export const COMP_RATIOS = [1, 1.12, 1.25, 1.4, 1.6, 1.8, 2, 2.5, 3.2, 4, 5.6, 8, 16, Infinity]
 
-/** Snap an arbitrary ratio to the closest ladder rung. */
+/** Snap an arbitrary ratio to the closest ladder rung (values > 24 → INF). */
 export function nearestRatio(v) {
-    if (v >= 16) return v > 24 ? Infinity : 16 // halfway between 16 and INF → INF
+    if (v >= 16) return v > 24 ? Infinity : 16 // 16 is the top finite rung; beyond 24 we treat as INF:1
     let best = COMP_RATIOS[0]
     let bestD = Infinity
     for (const r of COMP_RATIOS) {

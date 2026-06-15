@@ -65,15 +65,15 @@ export function pinpSourceCrop({ hCropping = 100, vCropping = 100, hViewPosition
 }
 
 /** Cover-crop a source of the program AR into a dest rect, panned by center 0..100. */
-function centerCrop(destW, destH, outW, outH, aCenter, bCenter) {
+function centerCrop(destW, destH, outW, outH, center) {
     const sourceAR = outW / outH
     const visibleAR = destW / destH
     if (visibleAR < sourceAR) {
         const sw = visibleAR / sourceAR
-        return { a: { sx: (aCenter / 100) * (1 - sw), sy: 0, sw, sh: 1 }, axis: 'x', sw }
+        return { sx: (center / 100) * (1 - sw), sy: 0, sw, sh: 1 }
     }
     const sh = sourceAR / visibleAR
-    return { a: { sx: 0, sy: (aCenter / 100) * (1 - sh), sw: 1, sh }, axis: 'y', sh }
+    return { sx: 0, sy: (center / 100) * (1 - sh), sw: 1, sh }
 }
 
 const FULL_CROP = { sx: 0, sy: 0, sw: 1, sh: 1 }
@@ -108,8 +108,8 @@ export function splitLayout(pattern = 'v-center', { aCenter = 50, bCenter = 50, 
     if (stretch) {
         return { divider, a: { dest: aDest, crop: { ...FULL_CROP } }, b: { dest: bDest, crop: { ...FULL_CROP } } }
     }
-    const aCrop = aDest.w > 0 && aDest.h > 0 ? centerCrop(aDest.w, aDest.h, outW, outH, aCenter, bCenter).a : { ...FULL_CROP }
-    const bCrop = bDest.w > 0 && bDest.h > 0 ? centerCrop(bDest.w, bDest.h, outW, outH, bCenter, bCenter).a : { ...FULL_CROP }
+    const aCrop = aDest.w > 0 && aDest.h > 0 ? centerCrop(aDest.w, aDest.h, outW, outH, aCenter) : { ...FULL_CROP }
+    const bCrop = bDest.w > 0 && bDest.h > 0 ? centerCrop(bDest.w, bDest.h, outW, outH, bCenter) : { ...FULL_CROP }
     return { divider, a: { dest: aDest, crop: aCrop }, b: { dest: bDest, crop: bCrop } }
 }
 

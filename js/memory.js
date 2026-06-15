@@ -10,6 +10,22 @@
  */
 export const MEMORY_SLOTS = 8
 
+// JSON drops non-finite numbers to null; audio params legitimately use them
+// (a send at -Infinity = off, a compressor ratio of Infinity = INF:1). Encode
+// them as sentinels so save/recall round-trips faithfully.
+function jsonReplacer(_key, value) {
+    if (value === Infinity) return '__Infinity__'
+    if (value === -Infinity) return '__-Infinity__'
+    if (typeof value === 'number' && Number.isNaN(value)) return '__NaN__'
+    return value
+}
+function jsonReviver(_key, value) {
+    if (value === '__Infinity__') return Infinity
+    if (value === '__-Infinity__') return -Infinity
+    if (value === '__NaN__') return NaN
+    return value
+}
+
 export class MemoryStore {
     constructor(storage, { prefix = 'hd4.memory.', slots = MEMORY_SLOTS } = {}) {
         this._storage = storage
@@ -20,13 +36,13 @@ export class MemoryStore {
     _key(slot) { return `${this._prefix}${slot}` }
 
     save(slot, snapshot) {
-        this._storage.setItem(this._key(slot), JSON.stringify(snapshot))
+        this._storage.setItem(this._key(slot), JSON.stringify(snapshot, jsonReplacer))
     }
 
     load(slot) {
         const raw = this._storage.getItem(this._key(slot))
         if (!raw) return null
-        try { return JSON.parse(raw) } catch { return null }
+        try { return JSON.parse(raw, jsonReviver) } catch { return null }
     }
 
     has(slot) { return this._storage.getItem(this._key(slot)) != null }

@@ -241,8 +241,18 @@ async function boot() {
     // and becomes selectable as a channel image.
     const captureStill = () => {
         if (!stillStore.capture(programView.canvas)) return
-        compositor.setStill(stillStore.canvas)
+        compositor.setStill(stillStore.canvas) // KEY STILL reads this live buffer
         multiview.setStillAvailable(true)
+        // Refresh any channel already sourced from the still so a re-capture
+        // propagates everywhere (the KEY path already tracks the live buffer).
+        state.channels.forEach((ch) => {
+            const s = ch.source
+            if (s?.type === 'image' && s.name === 'Still') {
+                ch.setSource(createSource('image', { url: stillStore.dataUrl, name: 'Still' }))
+                    .then(() => multiview.refresh())
+                    .catch(() => {})
+            }
+        })
     }
 
     // --- Recording (program canvas + main-bus audio → file) ---
