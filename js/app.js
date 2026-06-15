@@ -7,8 +7,10 @@
  * testable on its own (pure logic in Node, browser/GPU pieces in
  * Playwright).
  *
- * Phase 3: a program-bus switcher drives a 2D program compositor —
- * VIDEO INPUT SELECT [1–4] takes through CUT / MIX / WIPE + TIME.
+ * Wires the full v1 mixer: four channels + multiview, the program-bus
+ * switcher and 2D program compositor (CUT / MIX / WIPE), the output stage
+ * (QUAD / FREEZE / FADE / VFX), the WebAudio mixer, 8-slot memory, and
+ * keyboard shortcuts.
  */
 
 import { Channel } from './channel.js'
@@ -21,10 +23,13 @@ import { Switcher } from './switcher.js'
 import { ProgramCompositor } from './programCompositor.js'
 import { OutputState } from './outputState.js'
 import { AudioMixer } from './audio/mixer.js'
+import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
+import { attachKeyboard } from './keyboard.js'
 import { buildProgramView } from './ui/programView.js'
 import { buildTransitionBar } from './ui/transitionBar.js'
 import { buildOutputBar } from './ui/outputBar.js'
 import { buildMixerPanel } from './ui/mixerPanel.js'
+import { buildMemoryBar } from './ui/memoryBar.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -93,7 +98,7 @@ async function boot() {
     state.compositor = compositor
 
     // --- Transition bar ---
-    buildTransitionBar(document.getElementById('hd4-transition'), {
+    const transitionBar = buildTransitionBar(document.getElementById('hd4-transition'), {
         initialType: switcher.type,
         initialTime: switcher.time,
         onType: (t) => switcher.setType(t),
@@ -114,6 +119,36 @@ async function boot() {
         onMute: (i) => mixerPanel.setMuted(i, audio.toggleMute(i)),
         onSolo: (i) => mixerPanel.setSoloed(i, audio.toggleSolo(i)),
         onMainFader: (pos) => audio.setMainFader(pos),
+    })
+
+    // --- Memory (8-slot save/recall) ---
+    const memory = new MemoryStore(window.localStorage)
+    const modules = { channels: state.channels, switcher, output, audio }
+    const refreshAfterRecall = () => {
+        multiview.refresh()
+        transitionBar.setType(switcher.type)
+        transitionBar.setTime(switcher.time)
+        outputBar.setVfx(output.vfx)
+        for (let i = 0; i < CHANNEL_COUNT; i++) {
+            mixerPanel.setFader(i, audio.faderOf(i))
+            mixerPanel.setMuted(i, audio.isMuted(i))
+            mixerPanel.setSoloed(i, audio.isSoloed(i))
+        }
+        mixerPanel.setMainFader(audio.mainFader())
+    }
+    const memoryBar = buildMemoryBar(document.getElementById('hd4-topbar'), {
+        onSave: (slot) => { memory.save(slot, captureSnapshot(modules)); memoryBar.setOccupied(memory.list()) },
+        onRecall: (slot) => { applySnapshot(memory.load(slot), modules); refreshAfterRecall() },
+    })
+    memoryBar.setOccupied(memory.list())
+
+    // --- Keyboard shortcuts ---
+    attachKeyboard({
+        take: (a) => switcher.take(a.channel, now()),
+        transitionType: (a) => { switcher.setType(a.value); transitionBar.setType(a.value) },
+        quad: () => output.toggleQuad(),
+        freeze: () => output.toggleFreeze(),
+        fade: () => output.toggleFade(now()),
     })
 
     // Default each channel to a distinct shader (no permission prompt on
@@ -151,6 +186,7 @@ async function boot() {
         compositor,
         output,
         audio,
+        memory,
         get ready() { return state.ready },
         sampleChannelBrightness: (i) => brightnessOf(state.channels[i]?.canvas),
         sampleChannelAvg: (i) => avgColorOf(state.channels[i]?.canvas),

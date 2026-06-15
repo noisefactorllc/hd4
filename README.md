@@ -19,8 +19,27 @@ switcher.
 
 ## Status
 
-Early development. See [`docs/superpowers/specs/2026-06-14-hd4-design.md`](docs/superpowers/specs/2026-06-14-hd4-design.md)
-for the full design and roadmap.
+v1 — the core switcher + mixer is built and tested:
+
+- **4 channels**, each a camera, video file, image, or Noisemaker shader.
+- **Multiview** of all four sources + a **program monitor**.
+- **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**.
+- **QUAD** composite, **FREEZE**, **OUTPUT FADE**, and output **VFX** (negative / mono / sepia).
+- **Audio mixer**: per-channel fader / mute / solo / meter into a main bus (fader + limiter + meter).
+- **8 memory slots** (save / recall the full state, persisted to `localStorage`).
+
+Roadmap (PinP / SPLIT / KEY compositing, the full audio channel strip, auto-switching,
+MIDI, recording) and the full design rationale are in
+[`docs/superpowers/specs/2026-06-14-hd4-design.md`](docs/superpowers/specs/2026-06-14-hd4-design.md).
+
+## Keyboard
+
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| `1`–`4` | Take that channel | `q` | QUAD |
+| `c` | CUT transition | `f` | FREEZE |
+| `d` | MIX (dissolve) | `b` | FADE to black |
+| `w` | WIPE | | |
 
 ## Develop
 

@@ -33,6 +33,7 @@ export function buildProgramView(container, { onTake } = {}) {
         btn.className = 'hd4-take-btn'
         btn.dataset.channel = String(i)
         btn.textContent = String(i)
+        btn.title = `Take channel ${i} to program (key ${i})`
         btn.setAttribute('aria-label', `Take channel ${i} to program`)
         btn.addEventListener('click', () => onTake?.(i))
         bus.appendChild(btn)

@@ -33,6 +33,8 @@ export function buildMixerPanel(container, {
         setMainMeter(v) { main.setMeter(v) },
         setMuted(i, on) { strips[i].setMuted(on) },
         setSoloed(i, on) { strips[i].setSoloed(on) },
+        setFader(i, pos) { strips[i].setFader(pos) },
+        setMainFader(pos) { main.setFader(pos) },
     }
 }
 
@@ -71,6 +73,7 @@ function buildStrip(index, fader, { onFader, onMute, onSolo }) {
         setMeter(v) { fill.style.height = meterHeight(v) },
         setMuted(on) { mute.classList.toggle('is-active', on) },
         setSoloed(on) { solo.classList.toggle('is-active', on) },
+        setFader(pos) { range.value = String(pos) },
     }
 }
 
@@ -96,7 +99,11 @@ function buildMainStrip(fader, onMainFader) {
     label.textContent = 'MAIN'
 
     el.append(spacer, faderRow, label)
-    return { el, setMeter(v) { fill.style.height = meterHeight(v) } }
+    return {
+        el,
+        setMeter(v) { fill.style.height = meterHeight(v) },
+        setFader(pos) { range.value = String(pos) },
+    }
 }
 
 function makeFader(value, ariaLabel, onInput) {

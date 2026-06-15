@@ -22,6 +22,7 @@ export class OutputState {
 
     toggleQuad() { this.quad = !this.quad; return this.quad }
     toggleFreeze() { this.freeze = !this.freeze; return this.freeze }
+    setQuad(on) { this.quad = !!on }
     setVfx(name) { this.vfx = name }
 
     /** True when the output is fading to / held at black. */

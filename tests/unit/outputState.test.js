@@ -29,6 +29,14 @@ test('setVfx changes the active effect', () => {
     assert.equal(o.tick(0).vfx, 'negative')
 })
 
+test('setQuad sets the quad flag explicitly (for memory recall)', () => {
+    const o = new OutputState()
+    o.setQuad(true)
+    assert.equal(o.tick(0).quad, true)
+    o.setQuad(false)
+    assert.equal(o.tick(0).quad, false)
+})
+
 test('toggleFade ramps to black over the fade time, then holds', () => {
     const o = new OutputState({ fadeTime: 0.5 })
     o.toggleFade(0)

@@ -26,9 +26,9 @@ export function buildOutputBar(container, { onQuad, onFreeze, onFade, onVfx } = 
     const group = document.createElement('div')
     group.className = 'hd4-output-group'
 
-    const quad = toggleButton('QUAD', onQuad)
-    const freeze = toggleButton('FREEZE', onFreeze)
-    const fade = toggleButton('FADE', onFade)
+    const quad = toggleButton('QUAD', onQuad, 'Composite all four channels (key q)')
+    const freeze = toggleButton('FREEZE', onFreeze, 'Freeze the program output (key f)')
+    const fade = toggleButton('FADE', onFade, 'Fade the program to black (key b)')
 
     const vfxSelect = document.createElement('select')
     vfxSelect.className = 'hd4-vfx-select'
@@ -50,14 +50,16 @@ export function buildOutputBar(container, { onQuad, onFreeze, onFade, onVfx } = 
             freeze.setActive(f)
             fade.setActive(faded)
         },
+        setVfx(name) { vfxSelect.value = name },
     }
 }
 
-function toggleButton(label, onClick) {
+function toggleButton(label, onClick, title) {
     const el = document.createElement('button')
     el.type = 'button'
     el.className = 'hd4-output-btn'
     el.textContent = label
+    if (title) el.title = title
     el.addEventListener('click', () => onClick?.())
     return { el, setActive(on) { el.classList.toggle('is-active', !!on) } }
 }

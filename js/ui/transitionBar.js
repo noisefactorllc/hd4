@@ -22,12 +22,14 @@ export function buildTransitionBar(container, {
     const typeGroup = document.createElement('div')
     typeGroup.className = 'hd4-trans-types'
     const typeBtns = {}
+    const typeKeys = { cut: 'c', mix: 'd', wipe: 'w' }
     for (const [value, label] of [['cut', 'CUT'], ['mix', 'MIX'], ['wipe', 'WIPE']]) {
         const b = document.createElement('button')
         b.type = 'button'
         b.className = 'hd4-trans-btn'
         b.dataset.type = value
         b.textContent = label
+        b.title = `${label} transition (key ${typeKeys[value]})`
         b.addEventListener('click', () => { onType?.(value); applyType(value) })
         typeGroup.appendChild(b)
         typeBtns[value] = b
@@ -68,7 +70,11 @@ export function buildTransitionBar(container, {
             b.classList.toggle('is-active', k === value)
         }
     }
+    function applyTime(seconds) {
+        range.value = String(seconds)
+        readout.textContent = `${Number(seconds).toFixed(1)}s`
+    }
     applyType(initialType)
 
-    return { setType: applyType }
+    return { setType: applyType, setTime: applyTime }
 }

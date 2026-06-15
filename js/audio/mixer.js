@@ -81,6 +81,8 @@ export class AudioMixer {
     setFader(index, position) { this._strips[index].fader = position; this._recompute() }
     toggleMute(index) { const s = this._strips[index]; s.muted = !s.muted; this._recompute(); return s.muted }
     toggleSolo(index) { const s = this._strips[index]; s.soloed = !s.soloed; this._recompute(); return s.soloed }
+    setMute(index, on) { this._strips[index].muted = !!on; this._recompute() }
+    setSolo(index, on) { this._strips[index].soloed = !!on; this._recompute() }
     setMainFader(position) {
         this._main.fader = position
         if (this._main.gainNode) this._main.gainNode.gain.value = faderToGain(position)
