@@ -21,9 +21,11 @@ switcher.
 
 v1 — the core switcher + mixer is built and tested:
 
-- **4 channels**, each a camera, video file, image, or Noisemaker shader.
-- **Per-channel media fit**: scale (fit) or zoom/crop (fill), aspect-preserving.
+- **4 channels**, each a camera (pick the **device**), video file, image, or a
+  pattern/fill from the source library; **per-channel fit** (scale vs zoom/crop).
 - **Multiview** of all four sources + a **program monitor**.
+- **Fade curves** (linear / dipped / sharp / cut) for transitions and the output fade.
+- **Settings** drawer: output resolution, theme, output-fade time, beat sensitivity.
 - **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**.
 - **QUAD** composite, **FREEZE**, **OUTPUT FADE**, and output **VFX** (negative / mono / sepia).
 - **Audio mixer**: per-channel fader / mute / solo / meter into a main bus (fader + limiter + meter).
@@ -42,6 +44,7 @@ MIDI, recording) and the full design rationale are in
 | `c` | CUT transition | `f` | FREEZE |
 | `d` | MIX (dissolve) | `b` | FADE to black |
 | `w` | WIPE | `a` | AUTO (beat-synced) |
+| | | `s` | Settings |
 
 ## Develop
 

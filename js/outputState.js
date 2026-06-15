@@ -24,6 +24,7 @@ export class OutputState {
     toggleFreeze() { this.freeze = !this.freeze; return this.freeze }
     setQuad(on) { this.quad = !!on }
     setVfx(name) { this.vfx = name }
+    setFadeTime(seconds) { this._rate = seconds > 0 ? 1 / seconds : Infinity }
 
     /** True when the output is fading to / held at black. */
     get faded() { return this._fadeTarget === 1 }

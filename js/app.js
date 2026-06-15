@@ -25,6 +25,8 @@ import { ProgramCompositor } from './programCompositor.js'
 import { OutputState } from './outputState.js'
 import { AudioMixer } from './audio/mixer.js'
 import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
+import { Settings, parseResolution } from './settings.js'
+import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
 import { BeatClock } from './beatClock.js'
 import { AutoMix } from './autoMix.js'
@@ -35,6 +37,7 @@ import { buildOutputBar } from './ui/outputBar.js'
 import { buildMixerPanel } from './ui/mixerPanel.js'
 import { buildMemoryBar } from './ui/memoryBar.js'
 import { buildAutoBar } from './ui/autoBar.js'
+import { buildSettingsDrawer } from './ui/settingsDrawer.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -145,6 +148,26 @@ async function boot() {
     })
     beatClock.start(now())
 
+    // --- Settings (persisted global config) ---
+    const settings = new Settings(window.localStorage)
+    state.settings = settings
+    const applyResolution = (str) => {
+        const { width, height } = parseResolution(str)
+        if (width && height) compositor.resize(width, height)
+    }
+    const settingsDrawer = buildSettingsDrawer(app, settings, {
+        onResolution: (v) => { settings.set('resolution', v); applyResolution(v) },
+        onFadeTime: (v) => { settings.set('outputFadeTime', v); output.setFadeTime(v) },
+        onBeatSensitivity: (v) => { settings.set('beatSensitivity', v); beatDetect.setSensitivity(v) },
+        onTheme: (v) => { settings.set('theme', v); applyTheme(v) },
+    })
+    document.getElementById('hd4-topbar').appendChild(settingsDrawer.toggleButton)
+    // Apply persisted settings on boot.
+    applyResolution(settings.get('resolution'))
+    output.setFadeTime(settings.get('outputFadeTime'))
+    beatDetect.setSensitivity(settings.get('beatSensitivity'))
+    applyTheme(settings.get('theme'))
+
     // --- Multiview (source monitors) ---
     const multiview = buildMultiview(document.getElementById('hd4-sources'), state.channels, {
         onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => {
@@ -203,6 +226,7 @@ async function boot() {
             if (on) autoMix.reset(beatClock.beatIndex)
             autoBar.setEnabled(on)
         },
+        settings: () => settingsDrawer.toggle(),
     })
 
     // Default layout: a live camera, a (still-empty) file input, and two
@@ -282,6 +306,8 @@ async function boot() {
         memory,
         beatClock,
         autoMix,
+        settings,
+        settingsDrawer,
         get ready() { return state.ready },
         sampleChannelBrightness: (i) => brightnessOf(state.channels[i]?.canvas),
         sampleChannelAvg: (i) => avgColorOf(state.channels[i]?.canvas),

@@ -38,6 +38,11 @@ export class BeatDetector {
         return { onset, bpm: this._estimateBpm() }
     }
 
+    setSensitivity(v) {
+        const n = Number(v)
+        if (Number.isFinite(n) && n > 0) this._sensitivity = n
+    }
+
     reset() {
         this._history = []
         this._onsetTimes = []
