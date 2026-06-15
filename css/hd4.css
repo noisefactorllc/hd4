@@ -1030,3 +1030,38 @@ body {
     cursor: pointer;
 }
 .hd4-user-assign:hover { border-color: var(--hf-border-hover); }
+
+/* ---- MIDI panel ---- */
+.hd4-midi-open {
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-sm);
+    font-weight: var(--hf-weight-semibold);
+    letter-spacing: var(--hf-tracking-wide);
+    color: var(--hf-text-dim);
+    background: var(--hf-bg-elevated);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: var(--hf-space-1) var(--hf-space-2);
+    cursor: pointer;
+}
+.hd4-midi-open:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+
+.hd4-midi-enable { display: flex; align-items: center; gap: var(--hf-space-2); margin-bottom: var(--hf-space-2); }
+.hd4-midi-status { font-family: var(--hf-font-family-mono); font-size: var(--hf-size-xs); color: var(--hf-text-dim); }
+.hd4-midi-row { display: flex; align-items: center; gap: var(--hf-space-2); padding: 1px 0; }
+.hd4-midi-label { flex: 1; font-size: var(--hf-size-xs); color: var(--hf-text-normal); }
+.hd4-midi-sig {
+    flex: none; width: 4rem; text-align: right;
+    font-family: var(--hf-font-family-mono); font-size: var(--hf-size-xs);
+    color: var(--hf-accent);
+}
+.hd4-midi-learn {
+    flex: none; font-size: var(--hf-size-xs); color: var(--hf-text-dim);
+    background: var(--hf-bg-elevated); border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm); padding: 1px var(--hf-space-1); cursor: pointer;
+}
+.hd4-midi-learn.is-armed { color: var(--hf-bg-base); background: var(--hf-yellow); border-color: var(--hf-yellow); }
+.hd4-midi-clear {
+    flex: none; color: var(--hf-text-dim); background: none; border: none; cursor: pointer; font-size: var(--hf-size-sm);
+}
+.hd4-midi-clear:hover { color: var(--hf-red); }

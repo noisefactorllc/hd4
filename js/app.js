@@ -49,6 +49,8 @@ import { buildSettingsDrawer } from './ui/settingsDrawer.js'
 import { buildStripEditor } from './ui/stripEditor.js'
 import { UserButtons } from './userButtons.js'
 import { buildUserBar } from './ui/userBar.js'
+import { MidiMap, parseMidiMessage } from './midi.js'
+import { buildMidiPanel } from './ui/midiPanel.js'
 import { buildMainBusEditor } from './ui/mainBusEditor.js'
 
 const VERSION = '0.1.0'
@@ -364,6 +366,56 @@ async function boot() {
         },
     })
 
+    // --- MIDI control (learn + map) ---
+    const MIDI_KEY = 'hd4.midiMap'
+    const midiMap = new MidiMap()
+    try {
+        const saved = JSON.parse(window.localStorage.getItem(MIDI_KEY) || 'null')
+        if (Array.isArray(saved)) midiMap.restore(saved)
+    } catch { /* ignore corrupt */ }
+    const persistMidi = () => window.localStorage.setItem(MIDI_KEY, JSON.stringify(midiMap.serialize()))
+    const applyMidiFader = (id, value) => {
+        if (id === 'fader:main') { audio.setMainFader(value); mixerPanel.setMainFader(value) }
+        else if (id === 'transitionTime') { const s = value * 4; switcher.setTime(s); transitionBar.setTime(s) }
+        else if (id.startsWith('fader:')) { const ch = Number(id.slice(6)) - 1; audio.setFader(ch, value); mixerPanel.setFader(ch, value) }
+    }
+    const onMidi = (bytes) => {
+        const msg = parseMidiMessage(bytes)
+        if (!msg) return
+        const r = midiMap.handle(msg)
+        if (!r) return
+        if (r.learned) { midiPanel.setLearning(null); midiPanel.refresh(midiMap.list()); persistMidi() }
+        else if (r.action) runUserAction(r.action)
+        else if (r.fader) applyMidiFader(r.fader, r.value)
+    }
+    const enableMidi = async () => {
+        if (!navigator.requestMIDIAccess) { midiPanel.setStatus('unsupported'); return }
+        try {
+            const access = await navigator.requestMIDIAccess()
+            const wire = () => { for (const input of access.inputs.values()) input.onmidimessage = (e) => onMidi(e.data) }
+            wire()
+            access.onstatechange = wire
+            midiPanel.setStatus('enabled')
+        } catch { midiPanel.setStatus('denied') }
+    }
+    const midiPanel = buildMidiPanel(app, {
+        onEnable: () => enableMidi(),
+        onLearn: (target) => { midiMap.arm(target); midiPanel.setLearning(target) },
+        onClear: (target) => {
+            for (const { signature, target: t } of midiMap.list()) if (t.id === target.id) midiMap.clear(signature)
+            midiPanel.refresh(midiMap.list())
+            persistMidi()
+        },
+    })
+    midiPanel.refresh(midiMap.list())
+    const midiBtn = document.createElement('button')
+    midiBtn.type = 'button'
+    midiBtn.className = 'hd4-midi-open'
+    midiBtn.textContent = 'MIDI'
+    midiBtn.title = 'MIDI control (learn + map)'
+    midiBtn.addEventListener('click', () => midiPanel.open())
+    document.getElementById('hd4-topbar').appendChild(midiBtn)
+
     // Default layout: a live camera, a (still-empty) file input, and two
     // test-pattern references. Resilient — a denied camera or missing
     // device must not break boot.
@@ -459,6 +511,7 @@ async function boot() {
         captureStill,
         recorder,
         userButtons,
+        midi: { map: midiMap, simulate: (bytes) => onMidi(bytes) },
         get lastRecording() { return state.lastRecording || null },
         audio,
         memory,
