@@ -13,10 +13,8 @@ test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForFunction(() => window.__hd4?.ready === true, null, { timeout: 30_000 })
     await page.waitForFunction(() => window.__hd4.renderers.every((r) => r.isRunning), null, { timeout: 30_000 })
-    // Known content on every channel: ch2 (the empty file slot) gets a
-    // pattern so QUAD has four quadrants; ch3/ch4 are distinct solids so the
-    // color-identity assertions are unambiguous. (ch1 stays the camera.)
-    await page.selectOption('.hd4-monitor[data-channel="2"] .hd4-source-select', 'shader:0') // Color Bars
+    // Distinct solids on ch3/ch4 so the color-identity assertions are
+    // unambiguous. (ch1 = camera, ch2 = the bundled test card.)
     await page.selectOption('.hd4-monitor[data-channel="3"] .hd4-source-select', 'shader:5') // Blue
     await page.selectOption('.hd4-monitor[data-channel="4"] .hd4-source-select', 'shader:6') // Amber
     await page.waitForFunction(() => [0, 1, 2, 3].every((i) => window.__hd4.sampleChannelBrightness(i) > 0), null, { timeout: 30_000 })

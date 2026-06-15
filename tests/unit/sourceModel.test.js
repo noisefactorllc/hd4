@@ -68,6 +68,14 @@ test('createSource throws on an unknown type (fail fast in code)', () => {
     assert.throws(() => createSource('hologram'), /unknown source type/i)
 })
 
+test('image and video sources can carry a bundled url (e.g. the test card)', () => {
+    const i = createSource('image', { name: 'Test Card', url: 'img/testcard.png' })
+    assert.equal(i.url, 'img/testcard.png')
+    assert.equal(sourceLabel(i), 'Test Card')
+    assert.deepEqual(serializeSource(i), { type: 'image', name: 'Test Card', url: 'img/testcard.png' })
+    assert.deepEqual(deserializeSource(serializeSource(i)), i)
+})
+
 test('serializeSource keeps only persistable identity', () => {
     assert.deepEqual(
         serializeSource(createSource('camera', { deviceId: 'cam-1' })),

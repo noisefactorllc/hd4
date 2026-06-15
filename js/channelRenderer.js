@@ -18,6 +18,7 @@ import {
     extractEffectNamesFromDsl,
     extractEffectsFromDsl,
 } from './noisemaker/bundle.js'
+import { computeFit } from './fit.js'
 
 // `media()` with `search synth` resolves to "synth.media"; some code
 // paths spell it "synth/media". Accept either.
@@ -46,10 +47,13 @@ export class ChannelRenderer {
         this._currentDsl = ''
         this._mediaStep = null
         this._lastSize = null
+        this._fitMode = 'cover' // 'cover' (zoom/crop) | 'contain' (scale)
     }
 
     get currentDsl() { return this._currentDsl }
     get isRunning() { return !!this._renderer.isRunning }
+    get fitMode() { return this._fitMode }
+    setFitMode(mode) { this._fitMode = mode === 'contain' ? 'contain' : 'cover' }
     /** The underlying renderer (escape hatch for the program/transition stages). */
     get inner() { return this._renderer }
 
@@ -133,12 +137,10 @@ export class ChannelRenderer {
             this._fitCanvas.height = dh
         }
         const ctx = this._fitCtx
-        const scale = Math.max(dw / sw, dh / sh)
-        const w = sw * scale
-        const h = sh * scale
+        const { x, y, w, h } = computeFit(this._fitMode, sw, sh, dw, dh)
         ctx.fillStyle = '#000'
         ctx.fillRect(0, 0, dw, dh)
-        ctx.drawImage(src, (dw - w) / 2, (dh - h) / 2, w, h)
+        ctx.drawImage(src, x, y, w, h)
         return this._fitCanvas
     }
 

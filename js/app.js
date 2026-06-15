@@ -75,6 +75,12 @@ async function boot() {
         state.renderers.push(renderer)
     }
 
+    // Per-channel default fit: the test card (ch2) shows the whole card
+    // (scale); the camera and clips fill the frame (crop). Media-only —
+    // shader sources fill natively and ignore it.
+    const DEFAULT_FITS = ['cover', 'contain', 'cover', 'cover']
+    state.renderers.forEach((r, i) => r.setFitMode(DEFAULT_FITS[i]))
+
     // --- Switcher (program-bus state machine) + output stage ---
     const switcher = new Switcher({ channelCount: CHANNEL_COUNT, live: 1, type: 'mix', time: 1.0 })
     state.switcher = switcher
@@ -108,6 +114,8 @@ async function boot() {
     // --- Multiview (source monitors) ---
     const multiview = buildMultiview(document.getElementById('hd4-sources'), state.channels, {
         onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => multiview.refresh()),
+        onSetFit: (index, mode) => state.renderers[index].setFitMode(mode),
+        getFit: (index) => state.renderers[index].fitMode,
     })
 
     // --- Audio mixer panel (channel strips + main) ---
@@ -160,7 +168,7 @@ async function boot() {
     }
     const defaultSources = [
         createSource('camera'),
-        createSource('video', { name: '' }),
+        createSource('image', { url: 'img/testcard.png', name: 'Test Card' }),
         shaderSource('Color Bars'),
         shaderSource('Checkerboard'),
     ]

@@ -6,10 +6,11 @@
  * reports the user's choice via onSelectSource; the app applies it.
  */
 import { SHADER_PRESETS } from '../sources/presets.js'
+import { sourceKind } from '../sources/sourceModel.js'
 
-export function buildMultiview(container, channels, { onSelectSource } = {}) {
+export function buildMultiview(container, channels, { onSelectSource, onSetFit, getFit } = {}) {
     container.innerHTML = ''
-    const tiles = channels.map((ch, i) => buildTile(ch, i, onSelectSource))
+    const tiles = channels.map((ch, i) => buildTile(ch, i, onSelectSource, onSetFit, getFit ? getFit(i) : 'cover'))
     for (const t of tiles) container.appendChild(t.el)
 
     return {
@@ -17,12 +18,13 @@ export function buildMultiview(container, channels, { onSelectSource } = {}) {
             tiles.forEach((t, i) => {
                 t.setLabel(channels[i].label)
                 t.syncSelect(channels[i].source)
+                t.setFitVisible(sourceKind(channels[i].source) === 'media')
             })
         },
     }
 }
 
-function buildTile(channel, index, onSelectSource) {
+function buildTile(channel, index, onSelectSource, onSetFit, initialFit) {
     const el = document.createElement('div')
     el.className = 'hd4-monitor'
     el.dataset.channel = String(channel.id)
@@ -43,17 +45,37 @@ function buildTile(channel, index, onSelectSource) {
     label.className = 'hd4-monitor-label'
     label.textContent = channel.label
 
+    const fit = buildFitToggle(index, onSetFit, initialFit)
     const { control, select } = buildSourceSelect(index, onSelectSource)
     setSelectValue(select, channel.source)
 
-    bar.append(num, label, control)
+    bar.append(num, label, fit.el, control)
     el.append(screen, bar)
 
     return {
         el,
         setLabel(text) { label.textContent = text },
         syncSelect(source) { setSelectValue(select, source) },
+        setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
     }
+}
+
+/** Toggle a media channel between zoom/crop (cover) and scale (contain). */
+function buildFitToggle(index, onSetFit, initialMode = 'cover') {
+    let mode = initialMode === 'contain' ? 'contain' : 'cover'
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = 'hd4-fit-btn'
+    el.title = 'Fit: zoom/crop vs scale-to-fit'
+    el.setAttribute('aria-label', `Channel ${index + 1} fit mode`)
+    const render = () => { el.textContent = mode === 'cover' ? 'Crop' : 'Scale' }
+    render()
+    el.addEventListener('click', () => {
+        mode = mode === 'cover' ? 'contain' : 'cover'
+        render()
+        onSetFit?.(index, mode)
+    })
+    return { el }
 }
 
 function buildSourceSelect(index, onSelectSource) {

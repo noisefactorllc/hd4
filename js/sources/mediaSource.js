@@ -55,23 +55,25 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
     }
 
     function startVideoFile(file) {
-        if (!file) return
-        objectUrl = URL.createObjectURL(file)
+        // A runtime File (user-loaded) or a bundled url (e.g. a default clip).
+        const src = file ? (objectUrl = URL.createObjectURL(file)) : (source.url || '')
+        if (!src) return
         // Unmuted so the file's audio reaches the mixer graph (the element
         // source replaces direct playback once connected).
         video = makeHiddenVideo(false)
-        video.src = objectUrl
+        video.src = src
         video.loop = true
         if (audio) { try { audio.connectElement(video) } catch { /* ignore */ } }
         video.play().catch(() => {})
     }
 
     function startImageFile(file) {
-        if (!file) return
-        objectUrl = URL.createObjectURL(file)
+        // A runtime File (user-loaded) or a bundled url (e.g. the test card).
+        const src = file ? (objectUrl = URL.createObjectURL(file)) : (source.url || '')
+        if (!src) return
         img = new Image()
         img.crossOrigin = 'anonymous'
-        img.src = objectUrl
+        img.src = src
     }
 
     function tick() {

@@ -27,9 +27,9 @@ export function createSource(type, params = {}) {
         case 'camera':
             return { type: 'camera', deviceId: params.deviceId || '' }
         case 'video':
-            return { type: 'video', name: params.name || '' }
+            return { type: 'video', name: params.name || '', url: params.url || '' }
         case 'image':
-            return { type: 'image', name: params.name || '' }
+            return { type: 'image', name: params.name || '', url: params.url || '' }
         case 'shader':
             return { type: 'shader', dsl: params.dsl || '', name: params.name || '' }
         default:
@@ -61,8 +61,8 @@ export function sourceLabel(source) {
 export function serializeSource(source) {
     switch (source?.type) {
         case 'camera': return { type: 'camera', deviceId: source.deviceId || '' }
-        case 'video': return { type: 'video', name: source.name || '' }
-        case 'image': return { type: 'image', name: source.name || '' }
+        case 'video': return { type: 'video', name: source.name || '', url: source.url || '' }
+        case 'image': return { type: 'image', name: source.name || '', url: source.url || '' }
         case 'shader': return { type: 'shader', dsl: source.dsl || '', name: source.name || '' }
         default: return { type: 'none' }
     }
@@ -75,8 +75,8 @@ export function deserializeSource(obj) {
     try {
         switch (obj.type) {
             case 'camera': return createSource('camera', { deviceId: obj.deviceId })
-            case 'video': return createSource('video', { name: obj.name })
-            case 'image': return createSource('image', { name: obj.name })
+            case 'video': return createSource('video', { name: obj.name, url: obj.url })
+            case 'image': return createSource('image', { name: obj.name, url: obj.url })
             case 'shader':
                 if (!obj.dsl) return EMPTY_SOURCE
                 return createSource('shader', { dsl: obj.dsl, name: obj.name })

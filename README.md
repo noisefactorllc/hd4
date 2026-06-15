@@ -22,6 +22,7 @@ switcher.
 v1 — the core switcher + mixer is built and tested:
 
 - **4 channels**, each a camera, video file, image, or Noisemaker shader.
+- **Per-channel media fit**: scale (fit) or zoom/crop (fill), aspect-preserving.
 - **Multiview** of all four sources + a **program monitor**.
 - **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**.
 - **QUAD** composite, **FREEZE**, **OUTPUT FADE**, and output **VFX** (negative / mono / sepia).
