@@ -53,6 +53,149 @@ body {
     background: var(--hf-bg-surface);
 }
 
+/* ---- Program monitor + take bus ---- */
+.hd4-program { display: flex; padding: var(--hf-space-2); }
+
+.hd4-program-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--hf-space-2);
+}
+
+.hd4-program-screen {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #000;
+    border: var(--hf-border-width) solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.hd4-program-canvas {
+    max-width: 100%;
+    max-height: 100%;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.hd4-program-tag {
+    position: absolute;
+    top: var(--hf-space-2);
+    left: var(--hf-space-2);
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-xs);
+    font-weight: var(--hf-weight-bold);
+    letter-spacing: var(--hf-tracking-wide);
+    color: var(--hf-red);
+    background: color-mix(in srgb, #000 55%, transparent);
+    padding: 2px var(--hf-space-2);
+    border-radius: var(--hf-radius-sm);
+    pointer-events: none;
+}
+
+.hd4-take-bus {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--hf-space-2);
+    flex: none;
+}
+
+.hd4-take-btn {
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-lg);
+    font-weight: var(--hf-weight-bold);
+    color: var(--hf-text-dim);
+    background: var(--hf-bg-elevated);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: var(--hf-space-2) 0;
+    cursor: pointer;
+    transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
+}
+
+.hd4-take-btn:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+.hd4-take-btn:focus-visible {
+    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
+    outline-offset: var(--hf-focus-ring-offset);
+}
+
+.hd4-take-btn.is-live {
+    color: var(--hf-bg-base);
+    background: var(--hf-red);
+    border-color: var(--hf-red);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--hf-red) 50%, transparent);
+}
+
+.hd4-take-btn.is-transitioning { animation: hd4-pulse 0.6s ease-in-out infinite; }
+
+@keyframes hd4-pulse {
+    0%, 100% { box-shadow: 0 0 6px color-mix(in srgb, var(--hf-red) 40%, transparent); }
+    50% { box-shadow: 0 0 18px color-mix(in srgb, var(--hf-red) 80%, transparent); }
+}
+
+/* ---- Transition bar ---- */
+.hd4-transition { display: flex; align-items: center; }
+
+.hd4-transition-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--hf-space-4);
+    padding: var(--hf-space-2) var(--hf-space-3);
+    width: 100%;
+}
+
+.hd4-section-label {
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-xs);
+    letter-spacing: var(--hf-tracking-wide);
+    color: var(--hf-text-dim);
+}
+
+.hd4-trans-types { display: flex; gap: var(--hf-space-1); }
+
+.hd4-trans-btn {
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-sm);
+    font-weight: var(--hf-weight-semibold);
+    letter-spacing: var(--hf-tracking-wide);
+    color: var(--hf-text-dim);
+    background: var(--hf-bg-elevated);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: var(--hf-space-1) var(--hf-space-3);
+    cursor: pointer;
+    transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
+}
+
+.hd4-trans-btn:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+.hd4-trans-btn:focus-visible {
+    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
+    outline-offset: var(--hf-focus-ring-offset);
+}
+
+.hd4-trans-btn.is-active {
+    color: var(--hf-bg-base);
+    background: var(--hf-accent);
+    border-color: var(--hf-accent);
+}
+
+.hd4-time { display: flex; align-items: center; gap: var(--hf-space-2); }
+.hd4-time-range { width: 140px; accent-color: var(--hf-accent); cursor: pointer; }
+.hd4-time-readout {
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-sm);
+    color: var(--hf-text-normal);
+    min-width: 2.8em;
+}
+
 .hd4-sources {
     display: grid;
     grid-template-rows: repeat(4, 1fr);

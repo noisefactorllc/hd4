@@ -7,8 +7,8 @@
  * testable on its own (pure logic in Node, browser/GPU pieces in
  * Playwright).
  *
- * Phase 2: four channels, each a ChannelRenderer fed by a pluggable
- * source (shader / camera / video / image), shown in the multiview.
+ * Phase 3: a program-bus switcher drives a 2D program compositor —
+ * VIDEO INPUT SELECT [1–4] takes through CUT / MIX / WIPE + TIME.
  */
 
 import { Channel } from './channel.js'
@@ -17,17 +17,25 @@ import { makeChannelDriverFactory } from './sources/driverFactory.js'
 import { createSource } from './sources/sourceModel.js'
 import { SHADER_PRESETS, DEFAULT_SOURCE_PRESET_INDEX } from './sources/presets.js'
 import { buildMultiview } from './ui/multiview.js'
+import { Switcher } from './switcher.js'
+import { ProgramCompositor } from './programCompositor.js'
+import { buildProgramView } from './ui/programView.js'
+import { buildTransitionBar } from './ui/transitionBar.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
 const CHANNEL_W = 960
 const CHANNEL_H = 540
+const PROGRAM_W = 1280
+const PROGRAM_H = 720
 
 const state = {
     version: VERSION,
     ready: false,
     channels: [],
     renderers: [],
+    switcher: null,
+    compositor: null,
 }
 
 let _rafId = null
@@ -36,7 +44,7 @@ async function boot() {
     const app = document.getElementById('app')
     if (app) app.dataset.booted = 'true'
 
-    // Build the four channels, each with its own persistent renderer.
+    // --- Channels: each a persistent renderer with a pluggable source ---
     for (let i = 0; i < CHANNEL_COUNT; i++) {
         const canvas = document.createElement('canvas')
         const renderer = new ChannelRenderer(canvas, { width: CHANNEL_W, height: CHANNEL_H })
@@ -49,9 +57,28 @@ async function boot() {
         state.renderers.push(renderer)
     }
 
-    // Multiview (inserts each channel's canvas into its tile).
-    const sourcesEl = document.getElementById('hd4-sources')
-    const multiview = buildMultiview(sourcesEl, state.channels, {
+    // --- Switcher (program-bus state machine) ---
+    const switcher = new Switcher({ channelCount: CHANNEL_COUNT, live: 1, type: 'mix', time: 1.0 })
+    state.switcher = switcher
+
+    // --- Program view + compositor ---
+    const programView = buildProgramView(document.getElementById('hd4-program'), {
+        onTake: (i) => switcher.take(i, now()),
+    })
+    const compositor = new ProgramCompositor(programView.canvas, { width: PROGRAM_W, height: PROGRAM_H })
+    compositor.setChannels(state.channels)
+    state.compositor = compositor
+
+    // --- Transition bar ---
+    buildTransitionBar(document.getElementById('hd4-transition'), {
+        initialType: switcher.type,
+        initialTime: switcher.time,
+        onType: (t) => switcher.setType(t),
+        onTime: (s) => switcher.setTime(s),
+    })
+
+    // --- Multiview (source monitors) ---
+    const multiview = buildMultiview(document.getElementById('hd4-sources'), state.channels, {
         onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => multiview.refresh()),
     })
 
@@ -63,10 +90,12 @@ async function boot() {
     }))
     multiview.refresh()
 
-    // Per-frame pump: media channels upload their texture; shaders advance
-    // on their renderer's own loop, so tick() is a cheap no-op for them.
-    const frame = () => {
+    // --- Per-frame loop ---
+    const frame = (t) => {
         for (const ch of state.channels) ch.tick()
+        const pres = switcher.tick(t)
+        compositor.draw(pres, switcher.type)
+        programView.setLive(switcher.live, switcher.transitioning)
         _rafId = requestAnimationFrame(frame)
     }
     _rafId = requestAnimationFrame(frame)
@@ -80,22 +109,12 @@ async function boot() {
         state,
         channels: state.channels,
         renderers: state.renderers,
+        switcher,
+        compositor,
         get ready() { return state.ready },
-        // Read back a small sample of a channel's rendered output; returns
-        // the summed luma-ish brightness so a test can assert "not black".
-        sampleChannelBrightness(i) {
-            const canvas = state.channels[i]?.canvas
-            if (!canvas) return 0
-            const s = document.createElement('canvas')
-            s.width = 32
-            s.height = 18
-            const ctx = s.getContext('2d')
-            ctx.drawImage(canvas, 0, 0, s.width, s.height)
-            const data = ctx.getImageData(0, 0, s.width, s.height).data
-            let sum = 0
-            for (let p = 0; p < data.length; p += 4) sum += data[p] + data[p + 1] + data[p + 2]
-            return sum
-        },
+        sampleChannelBrightness: (i) => brightnessOf(state.channels[i]?.canvas),
+        sampleChannelAvg: (i) => avgColorOf(state.channels[i]?.canvas),
+        sampleProgramAvg: () => avgColorOf(programView.canvas),
     }
 
     document.dispatchEvent(new CustomEvent('hd4:ready', { detail: { version: VERSION } }))
@@ -112,6 +131,38 @@ async function applySourceChoice(index, choice) {
     } else if (choice.type === 'video' || choice.type === 'image') {
         await ch.setSource(createSource(choice.type, { name: choice.file.name }), { file: choice.file })
     }
+}
+
+function now() {
+    return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+}
+
+/** Downsample a canvas (WebGL or 2D) into a scratch and read its pixels. */
+function readScratch(canvas, w = 16, h = 9) {
+    if (!canvas) return null
+    const s = document.createElement('canvas')
+    s.width = w
+    s.height = h
+    const ctx = s.getContext('2d')
+    ctx.drawImage(canvas, 0, 0, w, h)
+    return ctx.getImageData(0, 0, w, h).data
+}
+
+function brightnessOf(canvas) {
+    const data = readScratch(canvas)
+    if (!data) return 0
+    let sum = 0
+    for (let p = 0; p < data.length; p += 4) sum += data[p] + data[p + 1] + data[p + 2]
+    return sum
+}
+
+function avgColorOf(canvas) {
+    const data = readScratch(canvas)
+    if (!data) return [0, 0, 0]
+    let r = 0, g = 0, b = 0
+    const n = data.length / 4
+    for (let p = 0; p < data.length; p += 4) { r += data[p]; g += data[p + 1]; b += data[p + 2] }
+    return [r / n, g / n, b / n]
 }
 
 if (document.readyState === 'loading') {
