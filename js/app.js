@@ -47,6 +47,8 @@ import { buildMemoryBar } from './ui/memoryBar.js'
 import { buildAutoBar } from './ui/autoBar.js'
 import { buildSettingsDrawer } from './ui/settingsDrawer.js'
 import { buildStripEditor } from './ui/stripEditor.js'
+import { UserButtons } from './userButtons.js'
+import { buildUserBar } from './ui/userBar.js'
 import { buildMainBusEditor } from './ui/mainBusEditor.js'
 
 const VERSION = '0.1.0'
@@ -329,6 +331,39 @@ async function boot() {
         settings: () => settingsDrawer.toggle(),
     })
 
+    // --- USER assignable macro buttons ---
+    const runUserAction = (id) => {
+        if (!id) return
+        if (id.startsWith('take:')) { switcher.take(Number(id.slice(5)), now()); return }
+        if (id.startsWith('mem:')) { applySnapshot(memory.load(Number(id.slice(4))), modules); refreshAfterRecall(); return }
+        switch (id) {
+            case 'cut': case 'mix': case 'wipe': switcher.setType(id); transitionBar.setType(id); break
+            case 'quad': case 'pinp': case 'split': compositorState.toggleComposition(id); syncComposition(); break
+            case 'key': compositorState.toggleKey(); syncComposition(); break
+            case 'freeze': output.toggleFreeze(); break
+            case 'fade': output.toggleFade(now()); break
+            case 'still': captureStill(); break
+            case 'record': toggleRecording(); break
+            case 'auto': { const on = autoMix.toggle(); if (on) autoMix.reset(beatClock.beatIndex); autoBar.setEnabled(on); break }
+            default: break
+        }
+    }
+    const USER_KEY = 'hd4.userButtons'
+    let savedUser = null
+    try { savedUser = JSON.parse(window.localStorage.getItem(USER_KEY) || 'null') } catch { savedUser = null }
+    const userButtons = new UserButtons({ assignments: Array.isArray(savedUser) ? savedUser : undefined })
+    state.userButtons = userButtons
+    const userBar = buildUserBar(document.getElementById('hd4-transition'), {
+        count: userButtons.count,
+        initial: userButtons.list(),
+        onTrigger: (slot) => runUserAction(userButtons.get(slot)),
+        onAssign: (slot, id) => {
+            userButtons.set(slot, id)
+            userBar.setAssignment(slot, userButtons.get(slot))
+            window.localStorage.setItem(USER_KEY, JSON.stringify(userButtons.serialize()))
+        },
+    })
+
     // Default layout: a live camera, a (still-empty) file input, and two
     // test-pattern references. Resilient — a denied camera or missing
     // device must not break boot.
@@ -423,6 +458,7 @@ async function boot() {
         still: stillStore,
         captureStill,
         recorder,
+        userButtons,
         get lastRecording() { return state.lastRecording || null },
         audio,
         memory,

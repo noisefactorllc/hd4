@@ -996,3 +996,37 @@ body {
     border-radius: var(--hf-radius-sm); padding: 2px 0; cursor: pointer;
 }
 .hd4-se-toggle.is-on { color: var(--hf-bg-base); background: var(--hf-green); border-color: var(--hf-green); }
+
+/* ---- USER assignable buttons ---- */
+.hd4-user-bar { display: flex; align-items: center; gap: var(--hf-space-2); flex-wrap: wrap; }
+.hd4-user-slot { display: flex; flex-direction: column; gap: 2px; width: 4.6rem; }
+.hd4-user-btn {
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-xs);
+    font-weight: var(--hf-weight-semibold);
+    color: var(--hf-text-normal);
+    background: var(--hf-bg-elevated);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: var(--hf-space-1) var(--hf-space-1);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
+}
+.hd4-user-btn:hover { border-color: var(--hf-accent); color: var(--hf-text-bright); }
+.hd4-user-btn:active { background: var(--hf-accent); color: var(--hf-bg-base); }
+.hd4-user-btn.is-unassigned { color: var(--hf-text-dim); }
+.hd4-user-assign {
+    font-family: var(--hf-font-family);
+    font-size: 0.62rem;
+    color: var(--hf-text-dim);
+    background: var(--hf-bg-surface);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: 0 1px;
+    max-width: 100%;
+    cursor: pointer;
+}
+.hd4-user-assign:hover { border-color: var(--hf-border-hover); }
