@@ -111,8 +111,10 @@ async function boot() {
     const transitionBar = buildTransitionBar(document.getElementById('hd4-transition'), {
         initialType: switcher.type,
         initialTime: switcher.time,
+        initialCurve: 'dipped',
         onType: (t) => switcher.setType(t),
         onTime: (s) => switcher.setTime(s),
+        onCurve: (c) => compositor.setCurve(c),
     })
 
     // --- Auto-mixing + beat matching ---

@@ -71,6 +71,16 @@ test('MIX take starts a transition and settles on the target channel', async ({ 
     }, { timeout: 15_000 }).toBeLessThan(30)
 })
 
+test('the transition curve selector is present and a curved MIX settles', async ({ page }) => {
+    await expect(page.locator('.hd4-curve-select')).toHaveCount(1)
+    await page.selectOption('.hd4-curve-select', 'sharp')
+    await page.click('.hd4-trans-btn[data-type="mix"]')
+    await page.evaluate(() => window.__hd4.switcher.setTime(0.5))
+    await page.click('.hd4-take-btn[data-channel="4"]')
+    await page.waitForFunction(() => window.__hd4.switcher.transitioning === false, null, { timeout: 10_000 })
+    expect(await page.evaluate(() => window.__hd4.switcher.live)).toBe(4)
+})
+
 test('WIPE take transitions and completes', async ({ page }) => {
     await page.click('.hd4-trans-btn[data-type="wipe"]')
     await page.evaluate(() => window.__hd4.switcher.setTime(1.5))

@@ -586,3 +586,16 @@ body {
     outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
     outline-offset: var(--hf-focus-ring-offset);
 }
+
+/* Transition / fade curve selector */
+.hd4-curve-select {
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-sm);
+    color: var(--hf-text-normal);
+    background: var(--hf-bg-elevated);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: 2px var(--hf-space-1);
+    cursor: pointer;
+}
+.hd4-curve-select:hover { border-color: var(--hf-border-hover); }

@@ -4,11 +4,15 @@
  * control, mirroring a classic transition section. Selecting a type sets
  * how the next take switches; TIME sets the transition duration (0–4 s).
  */
+import { CURVE_ORDER } from '../curves.js'
+
 export function buildTransitionBar(container, {
     onType,
     onTime,
+    onCurve,
     initialType = 'mix',
     initialTime = 1.0,
+    initialCurve = 'dipped',
 } = {}) {
     container.innerHTML = ''
 
@@ -62,7 +66,23 @@ export function buildTransitionBar(container, {
     })
 
     time.append(timeLabel, range, readout)
-    bar.append(heading, typeGroup, time)
+
+    const curveLabel = document.createElement('span')
+    curveLabel.className = 'hd4-section-label'
+    curveLabel.textContent = 'CURVE'
+    const curve = document.createElement('select')
+    curve.className = 'hd4-curve-select'
+    curve.setAttribute('aria-label', 'Transition / fade curve')
+    for (const name of CURVE_ORDER) {
+        const o = document.createElement('option')
+        o.value = name
+        o.textContent = name.charAt(0).toUpperCase() + name.slice(1)
+        curve.appendChild(o)
+    }
+    curve.value = initialCurve
+    curve.addEventListener('change', () => onCurve?.(curve.value))
+
+    bar.append(heading, typeGroup, time, curveLabel, curve)
     container.appendChild(bar)
 
     function applyType(value) {
@@ -76,5 +96,9 @@ export function buildTransitionBar(container, {
     }
     applyType(initialType)
 
-    return { setType: applyType, setTime: applyTime }
+    return {
+        setType: applyType,
+        setTime: applyTime,
+        setCurve: (name) => { curve.value = name },
+    }
 }

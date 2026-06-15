@@ -14,6 +14,7 @@
  */
 
 import { vfxFilter } from './vfx.js'
+import { curveFn } from './curves.js'
 
 /** Pure: decide what to draw this frame from a presentation + transition type. */
 export function transitionPlan(pres, type) {
@@ -31,6 +32,7 @@ export class ProgramCompositor {
         canvas.height = height
         this.ctx = canvas.getContext('2d')
         this._channels = []
+        this._curve = 'dipped' // easing for dissolve / wipe / fade
 
         this._base = document.createElement('canvas')
         this._base.width = width
@@ -39,6 +41,9 @@ export class ProgramCompositor {
     }
 
     setChannels(channels) { this._channels = channels }
+
+    /** Easing curve for dissolves / wipes / fades (linear|dipped|sharp|cut). */
+    setCurve(name) { this._curve = name }
 
     /** Render one program frame from the switcher presentation + output state. */
     draw(pres, type, output = {}) {
@@ -64,17 +69,18 @@ export class ProgramCompositor {
     _drawScene(ctx, pres, type) {
         const w = this.width
         const h = this.height
+        const ease = curveFn(this._curve)
         const plan = transitionPlan(pres, type)
         if (plan.kind === 'single') {
             this._blit(ctx, plan.channel, 0, 0, w, h)
         } else if (plan.kind === 'dissolve') {
             this._blit(ctx, plan.from, 0, 0, w, h)
-            ctx.globalAlpha = plan.mix
+            ctx.globalAlpha = ease(plan.mix)
             this._blit(ctx, plan.to, 0, 0, w, h)
             ctx.globalAlpha = 1
         } else if (plan.kind === 'wipe') {
             this._blit(ctx, plan.from, 0, 0, w, h)
-            const x = Math.round(w * plan.mix)
+            const x = Math.round(w * ease(plan.mix))
             if (x > 0) {
                 ctx.save()
                 ctx.beginPath()
@@ -112,7 +118,7 @@ export class ProgramCompositor {
 
         const fade = output.fade || 0
         if (fade > 0) {
-            ctx.globalAlpha = Math.min(1, fade)
+            ctx.globalAlpha = Math.min(1, curveFn(this._curve)(fade))
             ctx.fillStyle = '#000'
             ctx.fillRect(0, 0, w, h)
             ctx.globalAlpha = 1
