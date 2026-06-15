@@ -40,6 +40,32 @@ test('the captured still drives the KEY STILL source', async ({ page }) => {
     expect(dist(prog, amber)).toBeGreaterThan(40) // not the Amber background
 })
 
+test('re-capturing while KEY=STILL grabs the clean program, not the compounded overlay', async ({ page }) => {
+    // KEY=STILL keys the captured still over the live program. A re-capture
+    // must then grab the program *beneath* the key (the live channel) — not
+    // the already-keyed output — or the still compounds its own overlay.
+    // Amber live; key the (Blue) still over it so the program shows Blue.
+    await page.evaluate(() => {
+        window.__hd4.switcher.cut(4) // Amber live
+        window.__hd4.composition.setKey({ sourceCh: 5, type: 'chroma', chromaColor: 'green', level: 200, on: true })
+    })
+    await expect.poll(async () => {
+        const [p, blue] = await page.evaluate(() => [window.__hd4.sampleProgramAvg(), window.__hd4.sampleChannelAvg(2)])
+        return dist(p, blue) // program shows the opaque Blue still over Amber
+    }, { timeout: 15_000 }).toBeLessThan(40)
+
+    // Re-capture: the new still must be the clean program (Amber), not Blue.
+    await page.click('.hd4-output-btn:has-text("STILL")')
+    const still = await page.evaluate(() => {
+        const c = window.__hd4.still.canvas
+        const d = c.getContext('2d').getImageData(Math.floor(c.width * 0.5), Math.floor(c.height * 0.5), 1, 1).data
+        return [d[0], d[1], d[2]]
+    })
+    const [amber, blue] = await page.evaluate(() => [window.__hd4.sampleChannelAvg(3), window.__hd4.sampleChannelAvg(2)])
+    expect(dist(still, amber)).toBeLessThan(40) // grabbed the clean program (Amber)
+    expect(dist(still, blue)).toBeGreaterThan(40) // not the compounded Blue overlay
+})
+
 test('the captured still is selectable as a channel image', async ({ page }) => {
     await page.selectOption('.hd4-monitor[data-channel="1"] .hd4-source-select', 'still')
     await page.waitForFunction(() => window.__hd4.channels[0].source.type === 'image', null, { timeout: 10_000 })

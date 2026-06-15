@@ -49,12 +49,30 @@ export class ProgramCompositor {
         this._keyBuf.width = width
         this._keyBuf.height = height
         this._keyCtx = this._keyBuf.getContext('2d', { willReadFrequently: true })
+
+        // Scratch buffer: the program scene (live channel / transition) used
+        // as SPLIT region A, so the split honors an in-flight dissolve / wipe.
+        this._sceneBuf = document.createElement('canvas')
+        this._sceneBuf.width = width
+        this._sceneBuf.height = height
+        this._sceneCtx = this._sceneBuf.getContext('2d')
+
+        // The program *before* the KEY overlay — the source for a STILL
+        // re-capture, so capturing while KEY=STILL grabs the clean program
+        // beneath the key instead of compounding the overlay onto itself.
+        this._cleanBuf = document.createElement('canvas')
+        this._cleanBuf.width = width
+        this._cleanBuf.height = height
+        this._cleanCtx = this._cleanBuf.getContext('2d')
     }
 
     setChannels(channels) { this._channels = channels }
 
     /** Set the captured still used as a KEY source (canvas/image or null). */
     setStill(source) { this._still = source }
+
+    /** The program *before* the KEY overlay — source for a clean STILL re-capture. */
+    get cleanCanvas() { return this._cleanBuf }
 
     /** Easing curve for dissolves / wipes / fades (linear|dipped|sharp|cut). */
     setCurve(name) { this._curve = name }
@@ -81,13 +99,18 @@ export class ProgramCompositor {
         if (comp === 'quad') {
             this._drawQuad(ctx)
         } else if (comp === 'split') {
-            this._drawSplit(ctx, pres, output.split)
+            this._drawSplit(ctx, pres, type, output.split)
         } else {
             this._drawScene(ctx, pres, type)
             if (comp === 'pinp') this._drawPinp(ctx, output.pinp)
         }
 
-        if (output.key?.on && output.key.sourceCh) this._drawKey(ctx, output.key)
+        if (output.key?.on && output.key.sourceCh) {
+            // Snapshot the clean (pre-key) program for STILL re-capture, then key.
+            this._cleanCtx.clearRect(0, 0, w, h)
+            this._cleanCtx.drawImage(this._base, 0, 0)
+            this._drawKey(ctx, output.key)
+        }
     }
 
     _drawScene(ctx, pres, type) {
@@ -124,15 +147,34 @@ export class ProgramCompositor {
         }
     }
 
-    /** SPLIT: A = the live program channel (left/top), B = split.sourceB. */
-    _drawSplit(ctx, pres, split = {}) {
+    /**
+     * SPLIT: A = the live program (left/top), B = split.sourceB. Region A is
+     * the program feed, so it renders through the active transition (a
+     * mid-take dissolve / wipe is visible in the split, not a hard cut).
+     */
+    _drawSplit(ctx, pres, type, split = {}) {
         const layout = splitLayout(split.pattern, split, this.width, this.height)
-        this._drawRegion(ctx, pres.to, layout.a)
+        this._drawCroppedSource(ctx, this._renderScene(pres, type), layout.a)
         this._drawRegion(ctx, split.sourceB, layout.b)
     }
 
+    /** Render the program scene (live channel / transition) to a scratch buffer. */
+    _renderScene(pres, type) {
+        const sctx = this._sceneCtx
+        sctx.globalAlpha = 1
+        sctx.globalCompositeOperation = 'source-over'
+        sctx.filter = 'none'
+        sctx.clearRect(0, 0, this.width, this.height)
+        this._drawScene(sctx, pres, type)
+        return this._sceneBuf
+    }
+
     _drawRegion(ctx, channelNumber, region) {
-        const src = this._channels[channelNumber - 1]?.canvas
+        this._drawCroppedSource(ctx, this._channels[channelNumber - 1]?.canvas, region)
+    }
+
+    /** Blit a cropped source into a region's dest rect (the SPLIT region draw). */
+    _drawCroppedSource(ctx, src, region) {
         const d = region.dest
         if (!src || src.width <= 0 || d.w <= 0 || d.h <= 0) return
         const c = region.crop
@@ -220,6 +262,10 @@ export class ProgramCompositor {
         this._base.height = height
         this._keyBuf.width = width
         this._keyBuf.height = height
+        this._sceneBuf.width = width
+        this._sceneBuf.height = height
+        this._cleanBuf.width = width
+        this._cleanBuf.height = height
     }
 }
 

@@ -240,7 +240,12 @@ async function boot() {
     // Capture the current program as a still: feeds the KEY "STILL" source
     // and becomes selectable as a channel image.
     const captureStill = () => {
-        if (!stillStore.capture(programView.canvas)) return
+        // KEY=STILL keys the still over the program, so capturing the on-air
+        // canvas would compound the overlay onto itself. In that case grab the
+        // clean program *beneath* the key; otherwise capture the on-air program.
+        const k = compositorState.key
+        const source = k.on && k.sourceCh === 5 ? compositor.cleanCanvas : programView.canvas
+        if (!stillStore.capture(source)) return
         compositor.setStill(stillStore.canvas) // KEY STILL reads this live buffer
         multiview.setStillAvailable(true)
         // Refresh any channel already sourced from the still so a re-capture
