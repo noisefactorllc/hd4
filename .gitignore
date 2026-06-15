@@ -5,3 +5,6 @@ playwright/.cache/
 dist/
 *.log
 .DS_Store
+
+# Third-party reference manuals — kept locally, not distributed
+*.pdf
