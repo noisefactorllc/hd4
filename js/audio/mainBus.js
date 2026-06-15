@@ -20,6 +20,7 @@ export const MAIN_DEFAULTS = Object.freeze({
     mbHiThres: -20, mbMidThres: -16, mbLoThres: -20,
     mbHiRatio: 2, mbMidRatio: 2.5, mbLoRatio: 2,
     auxMute: false, auxLevel: 0, auxDelay: 0,
+    autoMixing: false, // AUTO MIXING global switch
 })
 
 const RANGES = {
@@ -31,7 +32,7 @@ const RANGES = {
     mbHiThres: [-40, 0], mbMidThres: [-40, 0], mbLoThres: [-40, 0],
     auxLevel: [-60, 10], auxDelay: [0, 500],
 }
-const BOOLS = new Set(['mainMute', 'mainLimiter', 'mbComp', 'auxMute'])
+const BOOLS = new Set(['mainMute', 'mainLimiter', 'mbComp', 'auxMute', 'autoMixing'])
 const RATIOS = new Set(['mbHiRatio', 'mbMidRatio', 'mbLoRatio'])
 
 export function clampMainParam(key, value) {

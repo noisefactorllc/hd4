@@ -76,6 +76,11 @@ export function buildStripEditor(container, { channelCount = 4, onParam } = {}) 
             rangeRow('AUX', 'auxSend', -60, 10, 1, dB),
             rangeRow('REV', 'revSend', -60, 10, 1, dB),
         ]),
+        group('Auto audio', [
+            toggleRow('FOLLOW VID', 'followVideo'),
+            toggleRow('AUTO MIX', 'autoMixEnabled'),
+            rangeRow('Mix weight', 'autoMixWeight', 0, 100, 1, (v) => `${v}`),
+        ]),
     )
 
     panel.append(header, body)

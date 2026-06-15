@@ -35,6 +35,7 @@ import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
 import { BeatClock } from './beatClock.js'
 import { AutoMix } from './autoMix.js'
+import { pickLoudest } from './audio/autoAudio.js'
 import { BeatDetector } from './beatDetect.js'
 import { buildProgramView } from './ui/programView.js'
 import { buildPreviewView } from './ui/previewView.js'
@@ -54,6 +55,8 @@ const CHANNEL_W = 960
 const CHANNEL_H = 540
 const PROGRAM_W = 1280
 const PROGRAM_H = 720
+const FOLLOW_AUDIO_SENSE = 0.02 // RMS threshold for VIDEO FOLLOWS AUDIO
+const FOLLOW_AUDIO_HOLD_MS = 1500 // min dwell before following again
 
 const state = {
     version: VERSION,
@@ -170,6 +173,7 @@ async function boot() {
     const autoMix = new AutoMix({ channelCount: CHANNEL_COUNT })
     const beatDetect = new BeatDetector()
     let matchAudio = false
+    let lastFollowSwitch = 0
     state.beatClock = beatClock
     state.autoMix = autoMix
     const autoBar = buildAutoBar(document.getElementById('hd4-transition'), {
@@ -375,6 +379,18 @@ async function boot() {
                 if (target) switcher.take(target, t)
             }
         }
+
+        // VIDEO FOLLOWS AUDIO: take the loudest included input (with a hold).
+        if (autoMix.enabled && autoMix.mode === 'follows-audio' && audio.enabled) {
+            const included = []
+            for (let c = 1; c <= CHANNEL_COUNT; c++) included.push(autoMix.isIncluded(c))
+            const target = pickLoudest(audio.getInputLevels(), included, FOLLOW_AUDIO_SENSE)
+            if (target && target !== switcher.live && (t - lastFollowSwitch) > FOLLOW_AUDIO_HOLD_MS) {
+                switcher.take(target, t)
+                lastFollowSwitch = t
+            }
+        }
+        audio.setLiveChannel(switcher.live)
 
         const pres = switcher.tick(t)
         const out = { ...output.tick(t), ...compositorState.snapshot() }

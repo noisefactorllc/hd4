@@ -28,7 +28,7 @@ export function buildAutoBar(container, {
     const mode = document.createElement('select')
     mode.className = 'hd4-auto-mode'
     mode.setAttribute('aria-label', 'Auto-switch mode')
-    for (const [v, t] of [['scan', 'Scan'], ['random', 'Random']]) {
+    for (const [v, t] of [['scan', 'Scan'], ['random', 'Random'], ['follows-audio', 'Follows audio']]) {
         const o = document.createElement('option'); o.value = v; o.textContent = t; mode.appendChild(o)
     }
     mode.value = initialMode

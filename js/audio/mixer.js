@@ -14,6 +14,7 @@
 import { faderToGain, resolveChannelGains, rms } from './levels.js'
 import { dbToGain, gateStep, clampStripParam, STRIP_DEFAULTS } from './strip.js'
 import { MAIN_DEFAULTS, clampMainParam, reverbIRParams } from './mainBus.js'
+import { autoMixGains } from './autoAudio.js'
 
 export class AudioMixer {
     constructor({ channelCount = 4 } = {}) {
@@ -47,6 +48,7 @@ export class AudioMixer {
             makeup: null,
             delayNode: null,
             panner: null,
+            autoNode: null, // follow / auto-mix ducking gain
             auxSend: null,
             revSend: null,
         }))
@@ -58,6 +60,8 @@ export class AudioMixer {
         this._auxChain = null // { delay, level, mute, streamDest }
         this._reverb = null // { busGain, convolver, returnGain }
         this._lastDyn = null
+        this._liveChannel = 1 // for audio-follows-video ducking
+        this._lastInputLevels = []
     }
 
     get enabled() { return !!this._ctx }
@@ -201,15 +205,46 @@ export class AudioMixer {
         const dt = now - this._lastDyn
         this._lastDyn = now
         if (dt <= 0) return
-        for (const strip of this._strips) {
-            if (!strip.gateNode) continue
-            if (!strip.params.gate) { if (strip.gateNode.gain.value !== 1) strip.gateNode.gain.value = 1; continue }
+
+        // One detector read per strip drives both the gate and the auto-audio.
+        const levels = this._strips.map((strip) => {
+            if (!strip.detect) return 0
             strip.detect.getFloatTimeDomainData(strip.detectBuf)
             const level = rms(strip.detectBuf)
-            const dbfs = level > 0 ? 20 * Math.log10(level) : -Infinity
-            const open = dbfs > strip.params.gateThreshold
-            strip.gateNode.gain.value = gateStep(strip.gateNode.gain.value, open, dt, strip.params.gateRelease)
-        }
+            if (strip.gateNode) {
+                if (!strip.params.gate) {
+                    if (strip.gateNode.gain.value !== 1) strip.gateNode.gain.value = 1
+                } else {
+                    const dbfs = level > 0 ? 20 * Math.log10(level) : -Infinity
+                    const open = dbfs > strip.params.gateThreshold
+                    strip.gateNode.gain.value = gateStep(strip.gateNode.gain.value, open, dt, strip.params.gateRelease)
+                }
+            }
+            return level
+        })
+        this._lastInputLevels = levels
+
+        // Auto-audio: audio-follows-video gate × AUTO MIXING share, glided.
+        const mix = this._mainParams.autoMixing
+            ? autoMixGains(levels, this._strips.map((s) => s.params.autoMixWeight), this._strips.map((s) => s.params.autoMixEnabled))
+            : null
+        const glide = dt / 80 // ~80 ms to reach target (avoids clicks)
+        this._strips.forEach((strip, i) => {
+            if (!strip.autoNode) return
+            let target = 1
+            if (strip.params.followVideo && (i + 1) !== this._liveChannel) target = 0
+            if (mix) target *= mix[i]
+            const cur = strip.autoNode.gain.value
+            strip.autoNode.gain.value = cur + Math.max(-glide, Math.min(glide, target - cur))
+        })
+    }
+
+    /** Tell the mixer which channel is live (for audio-follows-video). */
+    setLiveChannel(n) { this._liveChannel = n }
+
+    /** Per-channel input levels (pre-gate RMS), updated each tickDynamics. */
+    getInputLevels() {
+        return this._strips.map((_, i) => this._lastInputLevels[i] || 0)
     }
 
     isMuted(index) { return this._strips[index].muted }
@@ -326,6 +361,7 @@ export class AudioMixer {
             const delayNode = ctx.createDelay(0.5)
             const panner = ctx.createStereoPanner()
             const g = ctx.createGain()
+            const autoNode = ctx.createGain() // follow / auto-mix ducking
             const a = ctx.createAnalyser(); a.fftSize = 512
             const auxSend = ctx.createGain(); auxSend.gain.value = 0
             const revSend = ctx.createGain(); revSend.gain.value = 0
@@ -335,17 +371,17 @@ export class AudioMixer {
             eqHi.connect(detect) // measurement tap (output unconnected)
             eqHi.connect(gate)
             gate.connect(comp); comp.connect(makeup); makeup.connect(delayNode)
-            delayNode.connect(panner); panner.connect(g)
-            g.connect(a); a.connect(mainGain)
-            // Post-fader sends.
-            g.connect(auxSend); auxSend.connect(this._aux)
-            g.connect(revSend); revSend.connect(revBus)
+            delayNode.connect(panner); panner.connect(g); g.connect(autoNode)
+            autoNode.connect(a); a.connect(mainGain)
+            // Post-fader (post-auto) sends.
+            autoNode.connect(auxSend); auxSend.connect(this._aux)
+            autoNode.connect(revSend); revSend.connect(revBus)
 
             Object.assign(strip, {
                 inputNode: hpf, hpf, eqLo, eqMid, eqHi, detect,
                 detectBuf: new Float32Array(detect.fftSize),
                 gateNode: gate, comp, makeup, delayNode, panner,
-                gainNode: g, analyser: a, meterBuf: new Float32Array(a.fftSize),
+                gainNode: g, autoNode, analyser: a, meterBuf: new Float32Array(a.fftSize),
                 auxSend, revSend,
             })
             this._applyStrip(strip)

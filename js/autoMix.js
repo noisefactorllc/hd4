@@ -9,7 +9,7 @@
 export class AutoMix {
     constructor({ channelCount = 4, mode = 'scan', barsPerSwitch = 4, rng = Math.random } = {}) {
         this._channelCount = channelCount
-        this._mode = mode === 'random' ? 'random' : 'scan'
+        this._mode = AutoMix._normMode(mode)
         this._barsPerSwitch = Math.max(1, barsPerSwitch)
         this._rng = rng
         this._enabled = false
@@ -25,7 +25,8 @@ export class AutoMix {
 
     setEnabled(v) { this._enabled = !!v }
     toggle() { this._enabled = !this._enabled; return this._enabled }
-    setMode(m) { this._mode = m === 'random' ? 'random' : 'scan' }
+    setMode(m) { this._mode = AutoMix._normMode(m) }
+    static _normMode(m) { return ['scan', 'random', 'follows-audio'].includes(m) ? m : 'scan' }
     setBarsPerSwitch(n) { this._barsPerSwitch = Math.max(1, Number(n) || 1) }
 
     /** Include/exclude a channel from the auto rotation. */
@@ -41,6 +42,7 @@ export class AutoMix {
     /** Decide on a beat: returns the channel to take, or null. */
     onBeat(beat, live) {
         if (!this._enabled) return null
+        if (this._mode === 'follows-audio') return null // level-driven, not beat-driven
         if (!beat.isDownbeat) return null
         const barsSince = (beat.beatIndex - this._lastSwitchBeat) / 4
         if (barsSince < this._barsPerSwitch) return null

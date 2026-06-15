@@ -35,8 +35,9 @@ const RANGES = {
     compThreshold: [-60, 0], compAttack: [0.2, 100], compRelease: [30, 5000], compMakeup: [-40, 40],
     pan: [-1, 1], delay: [0, 500],
     auxSend: [-Infinity, 10], revSend: [-Infinity, 10],
+    autoMixWeight: [0, 100],
 }
-const BOOLS = new Set(['hpf', 'gate', 'comp', 'compAutoGain'])
+const BOOLS = new Set(['hpf', 'gate', 'comp', 'compAutoGain', 'followVideo', 'autoMixEnabled'])
 
 /** Validate/clamp one strip parameter to its legal range. */
 export function clampStripParam(key, value) {
@@ -59,6 +60,7 @@ export const STRIP_DEFAULTS = Object.freeze({
     comp: false, compThreshold: -30, compRatio: 2, compAttack: 1, compRelease: 380, compMakeup: 0, compAutoGain: false,
     pan: 0, delay: 0,
     auxSend: 0, revSend: -60, // -60 dB ≈ off (kept finite so state serializes)
+    followVideo: false, autoMixEnabled: false, autoMixWeight: 100, // auto-audio
 })
 
 /**

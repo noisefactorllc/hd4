@@ -102,3 +102,15 @@ test('setBarsPerSwitch and setMode reconfigure', () => {
     a.setBarsPerSwitch(0) // clamped up to at least 1
     assert.equal(a.barsPerSwitch, 1)
 })
+
+test('follows-audio mode is accepted and stands down from beat switching', () => {
+    const a = new AutoMix()
+    a.setMode('follows-audio')
+    assert.equal(a.mode, 'follows-audio')
+    a.setEnabled(true)
+    a.reset(0)
+    // even on a downbeat well past the bar count, level-driven mode never beat-switches
+    assert.equal(a.onBeat({ isDownbeat: true, beatIndex: 64 }, 1), null)
+    a.setMode('bogus') // invalid → falls back to scan
+    assert.equal(a.mode, 'scan')
+})

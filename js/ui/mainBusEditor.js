@@ -65,6 +65,9 @@ export function buildMainBusEditor(container, { onParam } = {}) {
             rangeRow('Level', 'auxLevel', -60, 10, 1, dB),
             rangeRow('Delay', 'auxDelay', 0, 500, 1, ms),
         ]),
+        group('Auto mixing', [
+            toggleRow('AUTO MIX', 'autoMixing'),
+        ]),
     )
 
     panel.append(header, body)
