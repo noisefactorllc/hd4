@@ -46,6 +46,7 @@ import { buildMemoryBar } from './ui/memoryBar.js'
 import { buildAutoBar } from './ui/autoBar.js'
 import { buildSettingsDrawer } from './ui/settingsDrawer.js'
 import { buildStripEditor } from './ui/stripEditor.js'
+import { buildMainBusEditor } from './ui/mainBusEditor.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -266,12 +267,16 @@ async function boot() {
         onMainFader: (pos) => audio.setMainFader(pos),
         onAudioSource: (i, mode, deviceId) => audio.setChannelAudioMode(i, mode, deviceId).then(refreshAudioInputs),
         onEditStrip: (i) => { audio.ensureContext(); stripEditor.open(i, audio.stripParams(i)) },
+        onEditMain: () => { audio.ensureContext(); mainBusEditor.open(audio.mainParams()) },
     })
 
-    // --- Per-channel audio strip editor (EQ / dynamics / pan / delay / sends) ---
+    // --- Audio editors: per-channel strip + main bus ---
     const stripEditor = buildStripEditor(app, {
         channelCount: CHANNEL_COUNT,
         onParam: (i, key, value) => audio.setStripParam(i, key, value),
+    })
+    const mainBusEditor = buildMainBusEditor(app, {
+        onParam: (key, value) => audio.setMainParam(key, value),
     })
     const refreshAudioInputs = async () => { mixerPanel.setAudioInputs(await listAudioInputs()) }
     if (navigator.mediaDevices?.addEventListener) {
@@ -294,6 +299,7 @@ async function boot() {
         }
         mixerPanel.setMainFader(audio.mainFader())
         if (stripEditor.isOpen) stripEditor.update(audio.stripParams(stripEditor.channel))
+        if (mainBusEditor.isOpen) mainBusEditor.update(audio.mainParams())
     }
     const memoryBar = buildMemoryBar(document.getElementById('hd4-topbar'), {
         onSave: (slot) => { memory.save(slot, captureSnapshot(modules)); memoryBar.setOccupied(memory.list()) },

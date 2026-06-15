@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
 
 test('the EQ button opens the editor and controls drive the strip params', async ({ page }) => {
     await page.click('.hd4-strip[data-channel="1"] .hd4-edit-btn')
-    await expect(page.locator('.hd4-stripedit-overlay')).toHaveAttribute('data-open', 'true')
+    await expect(page.locator('.hd4-stripedit-overlay--chan')).toHaveAttribute('data-open', 'true')
 
     await page.click('.hd4-se-toggle[data-key="hpf"]')
     expect(await page.evaluate(() => window.__hd4.audio.stripParam(0, 'hpf'))).toBe(true)
@@ -28,7 +28,7 @@ test('the EQ button opens the editor and controls drive the strip params', async
 
     // Switching tabs retargets the editor to another channel.
     await page.click('.hd4-stripedit-tab >> nth=1')
-    await expect(page.locator('.hd4-stripedit-title')).toHaveText('Channel 2 audio')
+    await expect(page.locator('.hd4-stripedit-overlay--chan .hd4-stripedit-title')).toHaveText('Channel 2 audio')
 })
 
 test('the gate closes on a high threshold and reopens on a low one', async ({ page }) => {

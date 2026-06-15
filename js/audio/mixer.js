@@ -13,6 +13,7 @@
  */
 import { faderToGain, resolveChannelGains, rms } from './levels.js'
 import { dbToGain, gateStep, clampStripParam, STRIP_DEFAULTS } from './strip.js'
+import { MAIN_DEFAULTS, clampMainParam, reverbIRParams } from './mainBus.js'
 
 export class AudioMixer {
     constructor({ channelCount = 4 } = {}) {
@@ -50,7 +51,11 @@ export class AudioMixer {
             revSend: null,
         }))
         this._main = { fader: 0.9, gainNode: null, limiter: null, analyser: null, meterBuf: null }
-        this._aux = null // AUX bus sum (routed by the main-bus stage)
+        this._mainParams = { ...MAIN_DEFAULTS }
+        this._mbOn = false
+        this._revCache = { time: null, type: null }
+        this._aux = null // AUX bus sum (channels' AUX sends land here)
+        this._auxChain = null // { delay, level, mute, streamDest }
         this._reverb = null // { busGain, convolver, returnGain }
         this._lastDyn = null
     }
@@ -256,39 +261,58 @@ export class AudioMixer {
     _buildGraph() {
         const ctx = this._ctx
 
+        // Main bus: gain → 3-band EQ → [MB comp] → limiter → mute → meter → out
         const mainGain = ctx.createGain()
         mainGain.gain.value = faderToGain(this._main.fader)
+        const mEqLo = ctx.createBiquadFilter(); mEqLo.type = 'lowshelf'
+        const mEqMid = ctx.createBiquadFilter(); mEqMid.type = 'peaking'
+        const mEqHi = ctx.createBiquadFilter(); mEqHi.type = 'highshelf'
         const limiter = ctx.createDynamicsCompressor()
-        limiter.threshold.value = -3
-        limiter.knee.value = 0
-        limiter.ratio.value = 20
         limiter.attack.value = 0.003
         limiter.release.value = 0.05
+        const muteGain = ctx.createGain()
         const mainAnalyser = ctx.createAnalyser()
         mainAnalyser.fftSize = 512
-        mainGain.connect(limiter)
-        limiter.connect(mainAnalyser)
+        mainGain.connect(mEqLo); mEqLo.connect(mEqMid); mEqMid.connect(mEqHi)
+        mEqHi.connect(limiter) // default: MB comp bypassed
+        limiter.connect(muteGain)
+        muteGain.connect(mainAnalyser)
         mainAnalyser.connect(ctx.destination)
+
+        // Multiband compressor sub-graph (3 crossover bands, bypassed until on).
+        const mbInput = ctx.createGain()
+        const mbOutput = ctx.createGain()
+        const mb = buildMultiband(ctx, mbInput, mbOutput)
+
         Object.assign(this._main, {
             gainNode: mainGain,
-            limiter,
+            eqLo: mEqLo, eqMid: mEqMid, eqHi: mEqHi,
+            limiter, muteGain,
             analyser: mainAnalyser,
             meterBuf: new Float32Array(mainAnalyser.fftSize),
+            mbInput, mbOutput, mb,
         })
 
-        // AUX bus (its routing is owned by the main-bus stage).
+        // AUX bus: sum → delay → level → mute → (stream tap, lazy).
         this._aux = ctx.createGain()
+        const auxDelay = ctx.createDelay(0.5)
+        const auxLevel = ctx.createGain()
+        const auxMute = ctx.createGain()
+        this._aux.connect(auxDelay); auxDelay.connect(auxLevel); auxLevel.connect(auxMute)
+        this._auxChain = { delay: auxDelay, level: auxLevel, mute: auxMute, streamDest: null }
 
         // Reverb bus: send → busGain → convolver → returnGain → main.
         const revBus = ctx.createGain()
         const convolver = ctx.createConvolver()
-        convolver.buffer = makeImpulse(ctx, 1.8, 2.6)
+        const rev = reverbIRParams(this._mainParams.reverbType, this._mainParams.reverbTime)
+        convolver.buffer = makeImpulse(ctx, rev.seconds, rev.decay)
         const revReturn = ctx.createGain()
-        revReturn.gain.value = 0.9
+        revReturn.gain.value = 0
         revBus.connect(convolver)
         convolver.connect(revReturn)
         revReturn.connect(mainGain)
         this._reverb = { busGain: revBus, convolver, returnGain: revReturn }
+        this._revCache = { time: this._mainParams.reverbTime, type: this._mainParams.reverbType }
 
         for (const strip of this._strips) {
             const hpf = ctx.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = 0
@@ -326,7 +350,75 @@ export class AudioMixer {
             })
             this._applyStrip(strip)
         }
+        this._applyMain()
         this._recompute()
+    }
+
+    /** Push the main-bus parameters onto their nodes. */
+    _applyMain() {
+        const m = this._main
+        const p = this._mainParams
+        if (!m.gainNode) return
+        m.eqLo.frequency.value = p.eqLoFreq; m.eqLo.gain.value = p.eqLo
+        m.eqMid.frequency.value = p.eqMidFreq; m.eqMid.Q.value = p.eqMidQ; m.eqMid.gain.value = p.eqMid
+        m.eqHi.frequency.value = p.eqHiFreq; m.eqHi.gain.value = p.eqHi
+        if (p.mainLimiter) {
+            m.limiter.threshold.value = p.mainLimiterThreshold; m.limiter.ratio.value = 20; m.limiter.knee.value = 0
+        } else {
+            m.limiter.threshold.value = 0; m.limiter.ratio.value = 1; m.limiter.knee.value = 0
+        }
+        m.muteGain.gain.value = p.mainMute ? 0 : 1
+        // Reverb return + (re)generate the impulse when time/type change.
+        this._reverb.returnGain.gain.value = dbToGain(p.reverbReturn)
+        if (this._revCache.time !== p.reverbTime || this._revCache.type !== p.reverbType) {
+            const rev = reverbIRParams(p.reverbType, p.reverbTime)
+            this._reverb.convolver.buffer = makeImpulse(this._ctx, rev.seconds, rev.decay)
+            this._revCache = { time: p.reverbTime, type: p.reverbType }
+        }
+        // Multiband comp band params + bypass routing.
+        const bands = [['Lo', m.mb.lo], ['Mid', m.mb.mid], ['Hi', m.mb.hi]]
+        for (const [name, band] of bands) {
+            band.comp.threshold.value = p[`mb${name}Thres`]
+            const ratio = p[`mb${name}Ratio`]
+            band.comp.ratio.value = Number.isFinite(ratio) ? Math.min(20, ratio) : 20
+        }
+        this._setMbComp(p.mbComp)
+        // AUX bus.
+        this._auxChain.delay.delayTime.value = p.auxDelay / 1000
+        this._auxChain.level.gain.value = dbToGain(p.auxLevel)
+        this._auxChain.mute.gain.value = p.auxMute ? 0 : 1
+    }
+
+    _setMbComp(on) {
+        if (on === this._mbOn) return
+        const m = this._main
+        try { m.eqHi.disconnect() } catch { /* ignore */ }
+        try { m.mbOutput.disconnect() } catch { /* ignore */ }
+        if (on) { m.eqHi.connect(m.mbInput); m.mbOutput.connect(m.limiter) }
+        else { m.eqHi.connect(m.limiter) }
+        this._mbOn = on
+    }
+
+    /** Set one main-bus parameter (clamped). */
+    setMainParam(key, value) {
+        if (!(key in this._mainParams)) return
+        this._mainParams[key] = clampMainParam(key, value)
+        if (this._main.gainNode) this._applyMain()
+        return this._mainParams[key]
+    }
+
+    setMainParams(obj = {}) { for (const [k, v] of Object.entries(obj)) this.setMainParam(k, v) }
+    mainParam(key) { return this._mainParams[key] }
+    mainParams() { return { ...this._mainParams } }
+
+    /** A MediaStream of the AUX bus (a separate monitor/record mix). */
+    getAuxStream() {
+        this.ensureContext()
+        if (!this._auxChain.streamDest) {
+            this._auxChain.streamDest = this._ctx.createMediaStreamDestination()
+            this._auxChain.mute.connect(this._auxChain.streamDest)
+        }
+        return this._auxChain.streamDest.stream
     }
 
     /** Push a strip's processing parameters onto its WebAudio nodes. */
@@ -363,6 +455,33 @@ export class AudioMixer {
             soloed: s.soloed,
         })))
         this._strips.forEach((s, i) => { if (s.gainNode) s.gainNode.gain.value = eff[i] })
+    }
+}
+
+/**
+ * A 3-band (low/mid/high) compressor split, wired input→bands→output but
+ * left disconnected from the main chain until enabled. Crossovers ~250 Hz
+ * and ~4 kHz. Returns the per-band { comp } for parameterization.
+ */
+function buildMultiband(ctx, input, output) {
+    const LOW = 250
+    const HIGH = 4000
+    const band = (filters) => {
+        const comp = ctx.createDynamicsCompressor()
+        comp.attack.value = 0.01
+        comp.release.value = 0.15
+        let node = input
+        for (const f of filters) { node.connect(f); node = f }
+        node.connect(comp)
+        comp.connect(output)
+        return { comp, filters }
+    }
+    const lp = (freq) => { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq; return f }
+    const hp = (freq) => { const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = freq; return f }
+    return {
+        lo: band([lp(LOW)]),
+        mid: band([hp(LOW), lp(HIGH)]),
+        hi: band([hp(HIGH)]),
     }
 }
 

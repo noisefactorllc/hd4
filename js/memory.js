@@ -55,6 +55,7 @@ export function captureSnapshot({ channels, switcher, output, compositor, audio 
                 ...(audio.stripParams ? { strip: audio.stripParams(i) } : {}),
             })),
             main: audio.mainFader(),
+            ...(audio.mainParams ? { mainBus: audio.mainParams() } : {}),
         },
     }
 }
@@ -83,5 +84,6 @@ export function applySnapshot(snap, { channels, switcher, output, compositor, au
             })
         }
         if (typeof snap.audio.main === 'number') audio.setMainFader(snap.audio.main)
+        if (snap.audio.mainBus && audio.setMainParams) audio.setMainParams(snap.audio.mainBus)
     }
 }

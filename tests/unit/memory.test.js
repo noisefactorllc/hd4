@@ -32,6 +32,7 @@ const sampleModulesForCapture = () => ({
         isSoloed: (i) => [true, false][i],
         mainFader: () => 0.8,
         stripParams: (i) => ({ pan: [-0.5, 0.5][i], eqHi: 3 }),
+        mainParams: () => ({ reverbType: 'hall', eqLo: 2 }),
     },
 })
 
@@ -86,6 +87,7 @@ test('captureSnapshot records channels, switcher, output, and audio', () => {
             { fader: 0.6, muted: true, soloed: false, strip: { pan: 0.5, eqHi: 3 } },
         ],
         main: 0.8,
+        mainBus: { reverbType: 'hall', eqLo: 2 },
     })
 })
 
@@ -113,6 +115,7 @@ test('applySnapshot drives the live modules with the saved values', () => {
             setSolo: (i, b) => calls.push(['setSolo', i, b]),
             setMainFader: (p) => calls.push(['setMainFader', p]),
             setStripParams: (i, s) => calls.push(['setStripParams', i, s?.pan]),
+            setMainParams: (m) => calls.push(['setMainParams', m?.reverbType]),
         },
     }
     const snap = captureSnapshot(sampleModulesForCapture())
@@ -128,6 +131,7 @@ test('applySnapshot drives the live modules with the saved values', () => {
     assert.ok(calls.some((c) => c[0] === 'setMute' && c[1] === 1 && c[2] === true))
     assert.ok(calls.some((c) => c[0] === 'setSolo' && c[1] === 0 && c[2] === true))
     assert.ok(calls.some((c) => c[0] === 'setStripParams' && c[1] === 1 && c[2] === 0.5))
+    assert.ok(calls.some((c) => c[0] === 'setMainParams' && c[1] === 'hall'))
     assert.ok(calls.some((c) => c[0] === 'setMainFader' && c[1] === 0.8))
 })
 

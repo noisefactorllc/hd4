@@ -15,6 +15,7 @@ export function buildMixerPanel(container, {
     onMainFader,
     onAudioSource,
     onEditStrip,
+    onEditMain,
 } = {}) {
     container.innerHTML = ''
     const panel = document.createElement('div')
@@ -26,7 +27,7 @@ export function buildMixerPanel(container, {
         panel.appendChild(strip.el)
         strips.push(strip)
     }
-    const main = buildMainStrip(initialMainFader, onMainFader)
+    const main = buildMainStrip(initialMainFader, onMainFader, onEditMain)
     panel.appendChild(main.el)
     container.appendChild(panel)
 
@@ -120,12 +121,13 @@ function buildAudioSelect(index, onAudioSource) {
     return { el, updateDevices: rebuild }
 }
 
-function buildMainStrip(fader, onMainFader) {
+function buildMainStrip(fader, onMainFader, onEditMain) {
     const el = document.createElement('div')
     el.className = 'hd4-strip hd4-strip-main'
 
     const spacer = document.createElement('div')
     spacer.className = 'hd4-strip-btns'
+    spacer.appendChild(stripButton('SET', 'hd4-edit-btn hd4-main-edit-btn', 'Main bus audio setup', () => onEditMain?.()))
 
     const faderRow = document.createElement('div')
     faderRow.className = 'hd4-strip-fader-row'
