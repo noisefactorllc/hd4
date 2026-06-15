@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="neutral-dark">
+<html lang="en" data-theme="neutral-dark" data-language="industrial">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -12,28 +12,26 @@
     <link rel="preconnect" href="https://shaders.noisedeck.app" crossorigin>
     <link rel="preconnect" href="https://handfish.noisefactor.io" crossorigin>
 
+    <!-- Global typeface: Atkinson Hyperlegible (Braille Institute high-legibility
+         face), supplied by handfish's industrial design language layer
+         (data-language="industrial"). The metric-matched Blank placeholder
+         preloads and reserves exact space so the real face swaps in with zero
+         layout shift / no flash of fallback text. -->
+    <link rel="preload" href="https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Blank.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Regular.woff2" as="font" type="font/woff2" crossorigin>
+
     <!-- handfish design language: tokens, base components, utilities. -->
     <link rel="stylesheet" href="https://handfish.noisefactor.io/0/styles/index.css">
     <!-- handfish "neutral dark" theme (colors only; activated via data-theme). -->
     <link rel="stylesheet" href="https://handfish.noisefactor.io/0/styles/themes/neutral.css">
+    <!-- Industrial typeface language (Atkinson + .hf-logotype + .hf-topbar
+         chrome); orthogonal to the colour theme, opted in at <html>. -->
+    <link rel="stylesheet" href="https://handfish.noisefactor.io/0/styles/industrial.css">
 
     <!-- Resolve `import ... from 'handfish'` to the CDN bundle (custom elements). -->
     <script type="importmap">
         { "imports": { "handfish": "https://handfish.noisefactor.io/0/handfish.esm.min.js" } }
     </script>
-
-    <!-- Global typeface: Atkinson Hyperlegible (Braille Institute high-legibility
-         face), via fontaine. The metric-matched Blank placeholder preloads and
-         reserves exact space so the real font swaps in with zero layout shift. -->
-    <link rel="preload" href="https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Blank.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Regular.woff2" as="font" type="font/woff2" crossorigin>
-    <style>
-        @font-face { font-family: 'Atkinson Hyperlegible Blank'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Blank.woff2') format('woff2'); font-weight: 100 900; font-display: block; }
-        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Regular.woff2') format('woff2');    font-weight: 100 500; font-style: normal; font-display: swap; }
-        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Bold.woff2') format('woff2');       font-weight: 600 900; font-style: normal; font-display: swap; }
-        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-Italic.woff2') format('woff2');     font-weight: 100 500; font-style: italic; font-display: swap; }
-        @font-face { font-family: 'Atkinson Hyperlegible'; src: url('https://fonts.noisefactor.io/fonts/atkinson-hyperlegible/AtkinsonHyperlegible-BoldItalic.woff2') format('woff2'); font-weight: 600 900; font-style: italic; font-display: swap; }
-    </style>
 
     <link rel="stylesheet" href="css/hd4.css">
 </head>

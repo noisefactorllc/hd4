@@ -6,7 +6,7 @@
  * live channel's (both read through the same path, so the invariant is
  * "program shows channel N" rather than a literal color).
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 

@@ -5,7 +5,7 @@
  * AUTO MIXING (global) and VIDEO FOLLOWS AUDIO are wired through their
  * controls (the gain-sharing / loudest-pick logic is unit-tested).
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const meter = (page, i) => page.evaluate((idx) => window.__hd4.audio.getMeter(idx), i)
 
@@ -30,7 +30,12 @@ test('AUDIO FOLLOW: a channel is heard only while its video is live', async ({ p
 })
 
 test('the auto-audio controls drive their state', async ({ page }) => {
-    await page.selectOption('.hd4-auto-mode', 'follows-audio')
+    // Mode is a handfish <select-dropdown>: set its value and fire change (the
+    // app reads el.value on change), rather than the native selectOption.
+    await page.locator('.hd4-auto-mode').evaluate((el) => {
+        el.value = 'follows-audio'
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+    })
     expect(await page.evaluate(() => window.__hd4.autoMix.mode)).toBe('follows-audio')
 
     await page.click('.hd4-strip[data-channel="1"] .hd4-edit-btn')

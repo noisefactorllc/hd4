@@ -4,7 +4,7 @@
  * controls drive the main-bus params. MAIN MUTE is verified audibly against
  * the main meter.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const mainMeter = (page) => page.evaluate(() => window.__hd4.audio.getMainMeter())
 

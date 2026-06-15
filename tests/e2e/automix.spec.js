@@ -4,7 +4,7 @@
  * transitions, enabling AUTO scans the program through the channels on the
  * beat. Also covers the keyboard toggle and the AUTO bar controls.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -63,9 +63,11 @@ test('the "a" key toggles AUTO', async ({ page }) => {
 
 test('tap tempo updates the BPM, and the AUTO controls are present', async ({ page }) => {
     await expect(page.locator('.hd4-auto-btn')).toHaveCount(1)
-    await expect(page.locator('.hd4-auto-tap')).toHaveCount(1)
     await expect(page.locator('.hd4-auto-mode')).toHaveCount(1)
     await expect(page.locator('.hd4-auto-sync')).toHaveCount(1)
+    // TAP + BPM now live in the handfish tempo-bar.
+    await expect(page.locator('.hd4-auto-bar tempo-bar .tempo-bar__tap')).toHaveCount(1)
+    await expect(page.locator('.hd4-auto-bar tempo-bar .tempo-bar__bpm')).toHaveCount(1)
 
     const bpm = await page.evaluate(() => {
         const c = window.__hd4.beatClock
@@ -73,4 +75,18 @@ test('tap tempo updates the BPM, and the AUTO controls are present', async ({ pa
         return c.bpm
     })
     expect(Math.round(bpm)).toBe(150)
+})
+
+test('the tempo-bar tap re-tempos the switching clock', async ({ page }) => {
+    // Tapping the tempo-bar's scheduler fires its `change`, which the app routes
+    // to BeatClock.setBpm — so the beat grid that drives AUTO follows the
+    // tempo-bar. Drive the scheduler with exact timestamps; 150 differs from the
+    // 120 default, so the change event genuinely fires and proves the routing.
+    const bpm = await page.evaluate(() => {
+        const tb = document.querySelector('.hd4-auto-bar tempo-bar')
+        tb.scheduler.tap(0); tb.scheduler.tap(400); tb.scheduler.tap(800) // 400ms → 150bpm
+        return { tempo: Math.round(tb.bpm), clock: Math.round(window.__hd4.beatClock.bpm) }
+    })
+    expect(bpm.tempo).toBe(150)
+    expect(bpm.clock).toBe(150) // routed into the switching clock
 })

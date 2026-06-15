@@ -5,7 +5,7 @@
  * real device's midimessage takes). Verifies learn binds the next control
  * and that a bound action fires and a bound fader moves.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.beforeEach(async ({ page }) => {
     await page.goto('/')

@@ -1,28 +1,22 @@
 // SPDX-License-Identifier: MIT
 /**
- * Output bar — the top strip: brand plus the master output controls
- * ([FREEZE] [OUTPUT FADE] [VFX]). Toggle buttons call back into the
- * OutputState; setState() reflects the authoritative state each frame so the
- * fade button tracks the ramp. (Composition — QUAD / PinP / SPLIT / KEY —
- * lives in the composition bar.)
+ * Output bar — the top strip: the HD4 logotype plus the master output
+ * controls ([FREEZE] [OUTPUT FADE] [VFX]). The logotype uses
+ * handfish's industrial `.hf-logotype` wordmark; the container is the
+ * `.hf-topbar` so the normalized cluster (settings + info, appended by the
+ * app) aligns to the right. Toggle buttons call back into the OutputState;
+ * setState() reflects the authoritative state each frame so the fade button
+ * tracks the ramp. (Composition — QUAD / PinP / SPLIT / KEY — lives in the
+ * composition bar.)
  */
 import { VFX, VFX_ORDER } from '../vfx.js'
 
 export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord } = {}) {
     container.innerHTML = ''
 
-    const brand = document.createElement('div')
-    brand.className = 'hd4-brand'
-    const mark = document.createElement('span')
-    mark.className = 'hd4-brand-mark'
-    mark.textContent = 'HD4'
-    const sub = document.createElement('span')
-    sub.className = 'hd4-brand-sub'
-    sub.textContent = 'video mixer'
-    brand.append(mark, sub)
-
-    const spacer = document.createElement('div')
-    spacer.className = 'hd4-topbar-spacer'
+    const logo = document.createElement('div')
+    logo.className = 'hf-logotype'
+    logo.textContent = 'HD4'
 
     const group = document.createElement('div')
     group.className = 'hd4-output-group'
@@ -49,7 +43,7 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
     vfxSelect.addEventListener('change', () => onVfx?.(vfxSelect.value))
 
     group.append(freeze.el, fade.el, still.el, record.el, vfxSelect)
-    container.append(brand, spacer, group)
+    container.append(logo, group)
 
     return {
         setState({ freeze: f, faded } = {}) {

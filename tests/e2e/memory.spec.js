@@ -5,7 +5,7 @@
  * audio mute) and the UI controls are restored. Plus persistence across a
  * reload.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.beforeEach(async ({ page }) => {
     await page.goto('/')

@@ -42,33 +42,31 @@ export function buildTransitionBar(container, {
         typeBtns[value] = b
     }
 
-    const time = document.createElement('label')
+    const time = document.createElement('div')
     time.className = 'hd4-time'
 
     const timeLabel = document.createElement('span')
     timeLabel.className = 'hd4-section-label'
     timeLabel.textContent = 'TIME'
 
-    const range = document.createElement('input')
-    range.type = 'range'
-    range.min = '0'
-    range.max = '4'
-    range.step = '0.1'
-    range.value = String(initialTime)
+    // TIME — handfish <slider-value> (editable inline readout). Fires input +
+    // change; we read el.value on input. A static "s" unit sits beside it.
+    const range = document.createElement('slider-value')
     range.className = 'hd4-time-range'
+    range.setAttribute('type', 'float')
+    range.setAttribute('min', '0')
+    range.setAttribute('max', '4')
+    range.setAttribute('step', '0.1')
+    range.setAttribute('value', String(initialTime))
     range.setAttribute('aria-label', 'Transition time (seconds)')
 
-    const readout = document.createElement('span')
-    readout.className = 'hd4-time-readout'
-    readout.textContent = `${initialTime.toFixed(1)}s`
+    const unit = document.createElement('span')
+    unit.className = 'hd4-time-unit'
+    unit.textContent = 's'
 
-    range.addEventListener('input', () => {
-        const t = parseFloat(range.value)
-        readout.textContent = `${t.toFixed(1)}s`
-        onTime?.(t)
-    })
+    range.addEventListener('input', () => onTime?.(parseFloat(range.value)))
 
-    time.append(timeLabel, range, readout)
+    time.append(timeLabel, range, unit)
 
     const curveLabel = document.createElement('span')
     curveLabel.className = 'hd4-section-label'
@@ -109,8 +107,7 @@ export function buildTransitionBar(container, {
         }
     }
     function applyTime(seconds) {
-        range.value = String(seconds)
-        readout.textContent = `${Number(seconds).toFixed(1)}s`
+        range.value = Number(seconds) // slider-value updates its own inline readout
     }
     applyType(initialType)
 

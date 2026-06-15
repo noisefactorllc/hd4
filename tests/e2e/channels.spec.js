@@ -7,7 +7,7 @@
  * Requires the shaders CDN and a Playwright browser. The fake media
  * device (see playwright.config.js) auto-grants camera permission.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.beforeEach(async ({ page }) => {
     await page.goto('/')

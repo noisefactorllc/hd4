@@ -13,6 +13,10 @@
  * keyboard shortcuts.
  */
 
+// Importing handfish registers the web components used by the UI
+// (select-dropdown, slider-value, tempo-bar) and provides the About dialog +
+// tooltip initializer for the industrial top bar.
+import { AboutDialog, initializeTooltips } from 'handfish'
 import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
 import { makeChannelDriverFactory } from './sources/driverFactory.js'
@@ -117,14 +121,40 @@ async function boot() {
     const recorder = new Recorder()
     state.recorder = recorder
 
-    // --- Top bar: brand + master output controls ---
-    const outputBar = buildOutputBar(document.getElementById('hd4-topbar'), {
-        onFreeze: () => output.toggleFreeze(),
-        onFade: () => output.toggleFade(now()),
-        onVfx: (name) => output.setVfx(name),
+    // --- Top bar: HD4 logotype + master output controls. The industrial
+    //     `.hf-topbar` chrome makes the right-aligned cluster (settings + info,
+    //     added below) sit upper-right; the MEMORY + MIDI app controls slot in
+    //     between the output group and the cluster. ---
+    const topbar = document.getElementById('hd4-topbar')
+    topbar.classList.add('hf-topbar')
+    const outputBar = buildOutputBar(topbar, {
+        onFreeze: () => { output.toggleFreeze(); showParam('FREEZE', output.freeze ? 'ON' : 'OFF') },
+        onFade: () => { output.toggleFade(now()); showParam('FADE', output.faded ? 'ON' : 'OFF') },
+        onVfx: (name) => { output.setVfx(name); showParam('VFX', String(name).toUpperCase()) },
         onStill: () => captureStill(),
         onRecord: () => toggleRecording(),
     })
+
+    // --- Status readout: the shared handfish <led-matrix> micro-OLED. Mounted
+    //     in the top bar between the output group and MEMORY, it shows the
+    //     last-touched control's { label, value } and otherwise idles on
+    //     HD4 / READY. activeControl latches the live readout; refreshOled()
+    //     restores it (or the idle default) when nothing is being touched. ---
+    const refs = {}
+    const led = document.createElement('led-matrix')
+    led.className = 'hd4-led'
+    topbar.append(led)
+    refs.led = led
+    let activeControl = null // { label, value } of the last-touched control, or null
+    function showParam(label, value) {
+        activeControl = { label, value }
+        refs.led.show(activeControl)
+    }
+    function refreshOled() {
+        if (activeControl) return refs.led.show(activeControl)
+        refs.led.show({ label: 'HD4', value: 'READY' })
+    }
+    refreshOled()
 
     // --- Program view + preview bus + compositor ---
     const previewBus = new PreviewBus({ channelCount: CHANNEL_COUNT, preview: 2 })
@@ -167,10 +197,10 @@ async function boot() {
         initialType: switcher.type,
         initialTime: switcher.time,
         initialCurve: 'dipped',
-        onType: (t) => switcher.setType(t),
-        onTime: (s) => switcher.setTime(s),
-        onCurve: (c) => compositor.setCurve(c),
-        onBlend: (b) => compositor.setBlend(b),
+        onType: (t) => { switcher.setType(t); showParam('XFADE', String(t).toUpperCase()) },
+        onTime: (s) => { switcher.setTime(s); showParam('TIME', `${s.toFixed(1)}s`) },
+        onCurve: (c) => { compositor.setCurve(c); showParam('CURVE', String(c).toUpperCase()) },
+        onBlend: (b) => { compositor.setBlend(b); showParam('BLEND', String(b).toUpperCase()) },
     })
 
     // --- Auto-mixing + beat matching ---
@@ -190,9 +220,12 @@ async function boot() {
             if (on) autoMix.reset(beatClock.beatIndex)
             autoBar.setEnabled(on)
         },
-        onTap: () => autoBar.setBpm(beatClock.tap(now())),
-        onMode: (m) => autoMix.setMode(m),
-        onBars: (n) => autoMix.setBarsPerSwitch(n),
+        // TAP + manual BPM edits surface through the tempo-bar's `change`
+        // event: re-tempo the switching clock and re-anchor its phase so the
+        // beat grid that drives AUTO follows the tempo-bar.
+        onTempoChange: (bpm) => { beatClock.setBpm(bpm); beatClock.resetPhase(now()); showParam('TEMPO', `${Math.round(bpm)} BPM`) },
+        onMode: (m) => { autoMix.setMode(m); showParam('MODE', String(m).toUpperCase()) },
+        onBars: (n) => { autoMix.setBarsPerSwitch(n); showParam('BARS', String(n)) },
         onMatchAudio: () => {
             matchAudio = !matchAudio
             if (matchAudio) beatDetect.reset()
@@ -200,6 +233,7 @@ async function boot() {
         },
     })
     beatClock.start(now())
+    autoBar.startTempo() // run the tempo-bar's beat animation alongside the clock
 
     // --- Settings (persisted global config) ---
     const settings = new Settings(window.localStorage)
@@ -214,7 +248,34 @@ async function boot() {
         onBeatSensitivity: (v) => { settings.set('beatSensitivity', v); beatDetect.setSensitivity(v) },
         onTheme: (v) => { settings.set('theme', v); applyTheme(v) },
     })
-    document.getElementById('hd4-topbar').appendChild(settingsDrawer.toggleButton)
+    // Normalized top-bar cluster (upper-right): settings gear + info. The gear
+    // is the drawer's own toggle (keeps its .hd4-settings-gear class + wiring);
+    // info opens the handfish AboutDialog. The cluster is appended to the top
+    // bar last (after MEMORY + MIDI) so it aligns right via margin-left:auto.
+    const about = new AboutDialog({
+        name: 'HD4',
+        version: VERSION,
+        tagline: 'video mixer',
+        repo: 'noisefactorllc/hd4',
+    })
+    // HD4 renders on the Noisemaker engine (the /1 channel its bundle loads) —
+    // surface that build in the About box.
+    about.setNoisemakerFromUrl('https://shaders.noisedeck.app/1/deployment-meta.json')
+    wireAboutBuild(about) // HD4's own deployed build hash/date, when present
+    const infoBtn = document.createElement('button')
+    infoBtn.type = 'button'
+    infoBtn.className = 'hf-icon-btn tooltip'
+    infoBtn.dataset.title = 'About HD4'
+    infoBtn.setAttribute('aria-label', 'About HD4')
+    const infoIcon = document.createElement('span')
+    infoIcon.className = 'hf-icon'
+    infoIcon.textContent = 'info'
+    infoBtn.appendChild(infoIcon)
+    infoBtn.addEventListener('click', () => about.show())
+    const topbarCluster = document.createElement('div')
+    topbarCluster.className = 'hf-topbar-cluster'
+    topbarCluster.append(settingsDrawer.toggleButton, infoBtn)
+
     // Apply persisted settings on boot.
     applyResolution(settings.get('resolution'))
     output.setFadeTime(settings.get('outputFadeTime'))
@@ -329,7 +390,7 @@ async function boot() {
         if (stripEditor.isOpen) stripEditor.update(audio.stripParams(stripEditor.channel))
         if (mainBusEditor.isOpen) mainBusEditor.update(audio.mainParams())
     }
-    const memoryBar = buildMemoryBar(document.getElementById('hd4-topbar'), {
+    const memoryBar = buildMemoryBar(topbar, {
         onSave: (slot) => { memory.save(slot, captureSnapshot(modules)); memoryBar.setOccupied(memory.list()) },
         onRecall: (slot) => { applySnapshot(memory.load(slot), modules); refreshAfterRecall() },
     })
@@ -430,11 +491,20 @@ async function boot() {
     midiPanel.refresh(midiMap.list())
     const midiBtn = document.createElement('button')
     midiBtn.type = 'button'
-    midiBtn.className = 'hd4-midi-open'
-    midiBtn.textContent = 'MIDI'
-    midiBtn.title = 'MIDI control (learn + map)'
+    midiBtn.className = 'hd4-midi-open hf-icon-btn tooltip'
+    midiBtn.dataset.title = 'MIDI control (learn + map)'
+    midiBtn.setAttribute('aria-label', 'MIDI control')
+    const midiIcon = document.createElement('span')
+    midiIcon.className = 'hf-icon'
+    midiIcon.textContent = 'piano'
+    midiBtn.appendChild(midiIcon)
     midiBtn.addEventListener('click', () => midiPanel.open())
-    document.getElementById('hd4-topbar').appendChild(midiBtn)
+    topbar.appendChild(midiBtn)
+
+    // Finally the normalized cluster (settings + info) — appended last so it
+    // anchors upper-right; tooltips activate the .tooltip data-title hints.
+    topbar.appendChild(topbarCluster)
+    initializeTooltips()
 
     // Default layout: a live camera, a (still-empty) file input, and two
     // test-pattern references. Resilient — a denied camera or missing
@@ -471,16 +541,17 @@ async function boot() {
         for (const ch of state.channels) ch.tick()
 
         // Beat matching: optionally re-anchor the clock to the audio, then
-        // run the beat clock and let auto-mix take channels on the beat.
+        // run the beat clock and let auto-mix take channels on the beat. The
+        // detected tempo is routed to the tempo-bar (audio SYNC sets BPM); the
+        // tempo-bar's change event re-tempos the BeatClock in turn.
         if (matchAudio && audio.enabled) {
             const { onset, bpm } = beatDetect.push(audio.getMainEnergy(), t)
             if (onset) {
                 beatClock.resetPhase(t)
-                if (bpm) { beatClock.setBpm(bpm); autoBar.setBpm(beatClock.bpm) }
+                if (bpm) autoBar.setBpm(bpm)
             }
         }
         for (const beat of beatClock.tick(t)) {
-            autoBar.flashBeat(beat)
             if (autoMix.enabled) {
                 const target = autoMix.onBeat(beat, switcher.live)
                 if (target) switcher.take(target, t)
@@ -521,6 +592,8 @@ async function boot() {
     window.__hd4 = {
         version: VERSION,
         state,
+        led,
+        refreshOled,
         channels: state.channels,
         renderers: state.renderers,
         switcher,
@@ -583,6 +656,23 @@ async function applySourceChoice(index, choice) {
 
 function now() {
     return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+}
+
+/**
+ * Populate the About dialog's build hash/date from the app's own
+ * deployment-meta.json (written by CI on deploy). Skipped on local dev where
+ * no meta exists; fails silently — the About box stays useful without it.
+ */
+function wireAboutBuild(dialog) {
+    const isLocalDev = ['localhost', '127.0.0.1'].includes(location.hostname) || location.protocol === 'file:'
+    if (isLocalDev) return
+    fetch('./deployment-meta.json', { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d && dialog.setBuild({
+            hash: d.git_hash?.trim().slice(0, 8) || 'LOCAL',
+            deployed: d.date ? new Date(d.date * 1000) : null,
+        }))
+        .catch(() => {})
 }
 
 /** mm:ss from milliseconds, for the recording readout. */

@@ -4,7 +4,7 @@
  * output resolution resizes the program output and persists; theme and
  * output-fade time apply and persist.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.beforeEach(async ({ page }) => {
     await page.goto('/')

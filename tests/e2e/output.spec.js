@@ -4,7 +4,7 @@
  * OUTPUT FADE, and VFX. Verified against the real program pixels (channel
  * 3 is solid Blue and channel 4 solid Amber, which make stable targets).
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 const sum = (a) => a[0] + a[1] + a[2]

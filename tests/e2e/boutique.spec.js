@@ -7,7 +7,7 @@
  * These are layout invariants of the boutique chrome, checked against the
  * real rendered geometry at a generous viewport.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // A roomy desktop so a full-bleed layout would clearly exceed the unit cap.
 test.use({ viewport: { width: 1600, height: 1200 } })

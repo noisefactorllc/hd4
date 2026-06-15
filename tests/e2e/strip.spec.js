@@ -5,7 +5,7 @@
  * gate is verified audibly: a high threshold closes it (the camera meter
  * falls silent), a low threshold reopens it.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const meter = (page, i) => page.evaluate((idx) => window.__hd4.audio.getMeter(idx), i)
 

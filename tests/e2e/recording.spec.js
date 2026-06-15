@@ -4,7 +4,7 @@
  * + main-bus audio) through MediaRecorder and produces a non-empty file.
  * Clicking REC is itself the user gesture that unlocks the AudioContext.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.beforeEach(async ({ page }) => {
     await page.goto('/')

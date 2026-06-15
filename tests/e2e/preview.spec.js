@@ -5,7 +5,7 @@
  * program returns to preview. Verified against the real program pixels and
  * the bus state.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 

@@ -4,7 +4,7 @@
  * action, can be reassigned through the select, and the assignments persist
  * across a reload (localStorage).
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.beforeEach(async ({ page }) => {
     // Each Playwright test gets a fresh context (empty localStorage), so USER

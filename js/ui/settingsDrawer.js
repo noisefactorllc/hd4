@@ -73,12 +73,18 @@ export function buildSettingsDrawer(container, settings, { onResolution, onFadeT
     overlay.appendChild(panel)
     container.appendChild(overlay)
 
+    // Drawer toggle — a handfish Material-Symbol icon button. Keeps the
+    // .hd4-settings-gear class (the keyboard/tests + app place it in the
+    // top-bar cluster) and adds the .tooltip data-title affordance.
     const toggleButton = document.createElement('button')
     toggleButton.type = 'button'
-    toggleButton.className = 'hd4-settings-gear'
-    toggleButton.title = 'Settings (s)'
+    toggleButton.className = 'hd4-settings-gear hf-icon-btn tooltip'
+    toggleButton.dataset.title = 'Settings (s)'
     toggleButton.setAttribute('aria-label', 'Settings')
-    toggleButton.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M19.4 13a7.8 7.8 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-3.8l-.4 2.6c-.6.2-1.2.6-1.7 1l-2.4-1-2 3.4L4.6 11a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.6h3.8l.4-2.6c.6-.2 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg>'
+    const gearIcon = document.createElement('span')
+    gearIcon.className = 'hf-icon'
+    gearIcon.textContent = 'settings'
+    toggleButton.appendChild(gearIcon)
 
     const open = () => { overlay.dataset.open = 'true' }
     const close = () => { overlay.dataset.open = 'false' }

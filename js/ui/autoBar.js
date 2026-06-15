@@ -1,12 +1,26 @@
 // SPDX-License-Identifier: MIT
 /**
  * AUTO bar — the auto-mixing / beat-matching controls (AUTO
- * SWITCHING). AUTO toggles beat-synced auto-switching; TAP sets the tempo
- * (with a BPM readout and a beat indicator); MODE picks scan vs random;
- * BARS sets how often it switches; SYNC matches the tempo to the audio.
+ * SWITCHING). The TEMPO portion (TAP + BPM readout + beat indicator + phase)
+ * is the handfish <tempo-bar> web component; the auto-switching extras sit
+ * beside it: AUTO toggles beat-synced auto-switching, MODE picks scan vs
+ * random vs follows-audio, BARS sets how often it switches, and SYNC matches
+ * the tempo to the audio.
+ *
+ * tempo-bar runs in `manual` mode (the app owns its start/stop and keeps it in
+ * lockstep with the BeatClock that actually drives switching). Editing the BPM
+ * or tapping fires the component's `change` event, reported via onTempoChange
+ * so the app re-tempos the BeatClock; the app pushes BPM back (setBpm) when the
+ * clock changes programmatically or the audio SYNC re-anchors it.
  */
+const MODES = [
+    ['scan', 'Scan'],
+    ['random', 'Random'],
+    ['follows-audio', 'Follows audio'],
+]
+
 export function buildAutoBar(container, {
-    onToggle, onTap, onMode, onBars, onMatchAudio,
+    onToggle, onTempoChange, onMode, onBars, onMatchAudio,
     initialBpm = 120, initialBars = 4, initialMode = 'scan',
 } = {}) {
     const bar = document.createElement('div')
@@ -16,22 +30,25 @@ export function buildAutoBar(container, {
 
     const autoBtn = button('hd4-auto-btn', 'AUTO', 'Beat-synced auto-switching', () => onToggle?.())
 
-    const dot = document.createElement('span')
-    dot.className = 'hd4-beat-dot'
+    // TEMPO: handfish tempo-bar (TAP + BPM + beat dots + phase). Manual so the
+    // app drives start/stop; no divider chrome is needed for HD4's beat grid,
+    // but the component renders it — it is harmless and left at the default.
+    const tempo = document.createElement('tempo-bar')
+    tempo.className = 'hd4-tempo'
+    tempo.setAttribute('manual', '')
+    tempo.setAttribute('bpm', String(Math.round(initialBpm)))
+    tempo.addEventListener('change', (e) => onTempoChange?.(e.detail?.bpm ?? tempo.bpm))
 
-    const tapBtn = button('hd4-auto-tap', 'TAP', 'Tap tempo', () => onTap?.())
-
-    const bpm = document.createElement('span')
-    bpm.className = 'hd4-auto-bpm'
-    bpm.textContent = `${Math.round(initialBpm)} BPM`
-
-    const mode = document.createElement('select')
+    const mode = document.createElement('select-dropdown')
     mode.className = 'hd4-auto-mode'
     mode.setAttribute('aria-label', 'Auto-switch mode')
-    for (const [v, t] of [['scan', 'Scan'], ['random', 'Random'], ['follows-audio', 'Follows audio']]) {
-        const o = document.createElement('option'); o.value = v; o.textContent = t; mode.appendChild(o)
+    for (const [v, t] of MODES) {
+        const o = document.createElement('option')
+        o.value = v
+        o.textContent = t
+        mode.appendChild(o)
     }
-    mode.value = initialMode
+    mode.setAttribute('value', initialMode)
     mode.addEventListener('change', () => onMode?.(mode.value))
 
     const bars = document.createElement('input')
@@ -40,26 +57,26 @@ export function buildAutoBar(container, {
     bars.max = '32'
     bars.step = '1'
     bars.value = String(initialBars)
-    bars.className = 'hd4-auto-bars'
+    bars.className = 'hd4-auto-bars hf-number'
     bars.setAttribute('aria-label', 'Bars per switch')
     bars.title = 'Bars per switch'
     bars.addEventListener('change', () => onBars?.(parseInt(bars.value, 10) || 1))
 
     const sync = button('hd4-auto-sync', 'SYNC', 'Match the tempo to the audio', () => onMatchAudio?.())
 
-    bar.append(heading, autoBtn, dot, tapBtn, bpm, mode, bars, sync)
+    bar.append(heading, autoBtn, tempo, mode, bars, sync)
     container.appendChild(bar)
 
     return {
+        el: bar,
+        tempoBar: tempo,
         setEnabled(on) { autoBtn.classList.toggle('is-active', !!on) },
         setMatchAudio(on) { sync.classList.toggle('is-active', !!on) },
-        setBpm(v) { bpm.textContent = `${Math.round(v)} BPM` },
-        flashBeat(beat) {
-            dot.classList.toggle('is-downbeat', !!beat.isDownbeat)
-            dot.style.animation = 'none'
-            void dot.offsetWidth // reflow to restart the flash
-            dot.style.animation = 'hd4-beat 0.25s ease-out'
-        },
+        /** Reflect a programmatic / audio-SYNC tempo onto the tempo-bar. */
+        setBpm(v) { tempo.bpm = v },
+        /** Start/stop the tempo-bar's beat animation (kept in lockstep with the clock). */
+        startTempo() { tempo.start() },
+        stopTempo() { tempo.stop() },
     }
 }
 

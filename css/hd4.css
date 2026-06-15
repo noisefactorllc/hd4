@@ -5,12 +5,14 @@
  * the full styling pass lands in the polish phase.
  */
 
-/* Global typeface — lean fully into Atkinson Hyperlegible (fontaine), for
-   both the UI and the numeric/mono readouts. The Blank face (preloaded in
-   index.html) is the metric-matched, zero-CLS fallback. */
+/* The global typeface (Atkinson Hyperlegible, for both the UI and the
+   numeric/mono readouts) is supplied by handfish's industrial design language
+   layer — <html data-language="industrial"> + industrial.css, loaded in
+   index.html. The metric-matched Blank face (preloaded in index.html) is the
+   zero-CLS placeholder. We only alias the mono token to the same face so the
+   readouts share the family (digits rely on tabular-nums). */
 :root {
-    --hf-font-family: 'Atkinson Hyperlegible', 'Atkinson Hyperlegible Blank';
-    --hf-font-family-mono: 'Atkinson Hyperlegible', 'Atkinson Hyperlegible Blank';
+    --hf-font-family-mono: var(--hf-font-family);
 
     /* ── Boutique form-factor (device-unit) tokens ──────────────────────────
        HD4 presents as a compact hardware "unit" floating on a darker
@@ -72,29 +74,13 @@ body {
     box-shadow: var(--hd4-bezel);
 }
 
+/* The top bar carries both .hd4-topbar (hd4 spacing) and the industrial
+   .hf-topbar chrome (logotype upper-left, .hf-topbar-cluster upper-right via
+   margin-left:auto). hd4-specific padding only. */
 .hd4-topbar {
-    display: flex;
-    align-items: center;
-    gap: var(--hf-space-3);
     min-height: var(--hf-titlebar-height);
     padding: 0 var(--hf-space-2);
 }
-
-.hd4-brand { display: flex; align-items: baseline; gap: var(--hf-space-2); }
-.hd4-brand-mark {
-    font-family: var(--hf-font-family-mono);
-    font-weight: var(--hf-weight-bold);
-    font-size: var(--hf-size-xl);
-    letter-spacing: var(--hf-tracking-wide);
-    color: var(--hf-text-bright);
-}
-.hd4-brand-sub {
-    font-size: var(--hf-size-xs);
-    letter-spacing: var(--hf-tracking-wide);
-    text-transform: uppercase;
-    color: var(--hf-text-dim);
-}
-.hd4-topbar-spacer { flex: 1; }
 
 .hd4-output-group { display: flex; align-items: center; gap: var(--hf-space-2); }
 
@@ -274,7 +260,9 @@ body {
     border-left: 1px solid var(--hf-border);
 }
 
-.hd4-auto-btn, .hd4-auto-tap, .hd4-auto-sync {
+/* AUTO + SYNC toggle buttons. (TAP + BPM + beat indicator + phase now live
+   inside the .hd4-tempo <tempo-bar>.) */
+.hd4-auto-btn, .hd4-auto-sync {
     font-family: var(--hf-font-family);
     font-size: var(--hf-size-sm);
     font-weight: var(--hf-weight-semibold);
@@ -287,8 +275,8 @@ body {
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
-.hd4-auto-btn:hover, .hd4-auto-tap:hover, .hd4-auto-sync:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
-.hd4-auto-btn:focus-visible, .hd4-auto-tap:focus-visible, .hd4-auto-sync:focus-visible {
+.hd4-auto-btn:hover, .hd4-auto-sync:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+.hd4-auto-btn:focus-visible, .hd4-auto-sync:focus-visible {
     outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
     outline-offset: var(--hf-focus-ring-offset);
 }
@@ -303,38 +291,13 @@ body {
     border-color: var(--hf-accent);
 }
 
-.hd4-auto-bpm {
-    font-family: var(--hf-font-family-mono);
-    font-size: var(--hf-size-sm);
-    color: var(--hf-text-normal);
-    min-width: 4.5em;
-}
+/* TEMPO — handfish tempo-bar; keep it compact in the dense AUTO row. */
+.hd4-tempo { --hf-space-2: 6px; }
 
-.hd4-auto-mode, .hd4-auto-bars {
-    font-family: var(--hf-font-family);
-    font-size: var(--hf-size-sm);
-    color: var(--hf-text-normal);
-    background: var(--hf-bg-elevated);
-    border: 1px solid var(--hf-border);
-    border-radius: var(--hf-radius-sm);
-    padding: 2px var(--hf-space-1);
-    cursor: pointer;
-}
-.hd4-auto-bars { width: 3.2em; }
-
-.hd4-beat-dot {
-    width: 0.7rem;
-    height: 0.7rem;
-    border-radius: 50%;
-    background: var(--hf-text-dim);
-    opacity: 0.35;
-}
-.hd4-beat-dot.is-downbeat { background: var(--hf-accent); }
-
-@keyframes hd4-beat {
-    from { opacity: 1; transform: scale(1.5); }
-    to { opacity: 0.35; transform: scale(1); }
-}
+/* Auto-switch mode is a handfish <select-dropdown> (styled by the component);
+   BARS is a handfish .hf-number input. Width hooks only. */
+.hd4-auto-mode { min-width: 7.5em; }
+.hd4-auto-bars { width: 3.6em; }
 
 .hd4-section-label {
     font-family: var(--hf-font-family-mono);
@@ -372,12 +335,13 @@ body {
 }
 
 .hd4-time { display: flex; align-items: center; gap: var(--hf-space-2); }
-.hd4-time-range { width: 140px; accent-color: var(--hf-accent); cursor: pointer; }
-.hd4-time-readout {
+/* TIME is a handfish <slider-value> (display:contents). Size its inner range;
+   the editable numeric readout is the component's own .value-display. */
+.hd4-time-range .slider { width: 140px; }
+.hd4-time-unit {
     font-family: var(--hf-font-family-mono);
     font-size: var(--hf-size-sm);
-    color: var(--hf-text-normal);
-    min-width: 2.8em;
+    color: var(--hf-text-dim);
 }
 
 .hd4-sources {
@@ -676,24 +640,11 @@ body {
 .hd4-curve-select:hover,
 .hd4-blend-select:hover { border-color: var(--hf-border-hover); }
 
-/* ---- Settings drawer ---- */
-.hd4-settings-gear {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--hf-text-dim);
-    background: var(--hf-bg-elevated);
-    border: 1px solid var(--hf-border);
-    border-radius: var(--hf-radius-sm);
-    padding: var(--hf-space-1);
-    cursor: pointer;
-    transition: var(--hf-transition-color), var(--hf-transition-border);
-}
-.hd4-settings-gear:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
-.hd4-settings-gear:focus-visible {
-    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
-    outline-offset: var(--hf-focus-ring-offset);
-}
+/* ---- Settings drawer ----
+   The gear toggle (.hd4-settings-gear) is now a handfish .hf-icon-btn living in
+   the .hf-topbar-cluster, so its look comes from menus-and-toolbars.css +
+   industrial.css (cluster sizing). .hd4-settings-gear stays as a behaviour hook
+   only — no box styling here, to avoid double borders/backgrounds. */
 
 .hd4-settings-overlay {
     position: fixed;
@@ -1101,20 +1052,10 @@ body {
 }
 .hd4-user-assign:hover { border-color: var(--hf-border-hover); }
 
-/* ---- MIDI panel ---- */
-.hd4-midi-open {
-    font-family: var(--hf-font-family);
-    font-size: var(--hf-size-sm);
-    font-weight: var(--hf-weight-semibold);
-    letter-spacing: var(--hf-tracking-wide);
-    color: var(--hf-text-dim);
-    background: var(--hf-bg-elevated);
-    border: 1px solid var(--hf-border);
-    border-radius: var(--hf-radius-sm);
-    padding: var(--hf-space-1) var(--hf-space-2);
-    cursor: pointer;
-}
-.hd4-midi-open:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+/* ---- MIDI panel ----
+   The MIDI top-bar opener (.hd4-midi-open) is a handfish .hf-icon-btn (piano
+   glyph), styled by menus-and-toolbars.css; the class is a behaviour hook
+   only. It sits just left of the .hf-topbar-cluster. */
 
 .hd4-midi-enable { display: flex; align-items: center; gap: var(--hf-space-2); margin-bottom: var(--hf-space-2); }
 .hd4-midi-status { font-family: var(--hf-font-family-mono); font-size: var(--hf-size-xs); color: var(--hf-text-dim); }

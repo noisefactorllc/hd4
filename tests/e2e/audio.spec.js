@@ -7,7 +7,7 @@
  * The leading take-button click establishes the user gesture that lets the
  * AudioContext resume.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const meter = (page, i) => page.evaluate((idx) => window.__hd4.audio.getMeter(idx), i)
 
