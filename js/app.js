@@ -17,7 +17,7 @@ import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
 import { makeChannelDriverFactory } from './sources/driverFactory.js'
 import { createSource } from './sources/sourceModel.js'
-import { SHADER_PRESETS, DEFAULT_SOURCE_PRESET_INDEX } from './sources/presets.js'
+import { SHADER_PRESETS } from './sources/presets.js'
 import { buildMultiview } from './ui/multiview.js'
 import { Switcher } from './switcher.js'
 import { ProgramCompositor } from './programCompositor.js'
@@ -151,13 +151,33 @@ async function boot() {
         fade: () => output.toggleFade(now()),
     })
 
-    // Default each channel to a distinct shader (no permission prompt on
-    // first run; the user can switch any channel to a camera or file).
-    await Promise.all(state.channels.map((ch, i) => {
-        const preset = SHADER_PRESETS[DEFAULT_SOURCE_PRESET_INDEX[i]]
-        return ch.setSource(createSource('shader', { dsl: preset.dsl, name: preset.name }))
-    }))
+    // Default layout: a live camera, a (still-empty) file input, and two
+    // test-pattern references. Resilient — a denied camera or missing
+    // device must not break boot.
+    const shaderSource = (name) => {
+        const p = SHADER_PRESETS.find((x) => x.name === name)
+        return createSource('shader', { dsl: p.dsl, name: p.name })
+    }
+    const defaultSources = [
+        createSource('camera'),
+        createSource('video', { name: '' }),
+        shaderSource('Color Bars'),
+        shaderSource('Checkerboard'),
+    ]
+    await Promise.all(state.channels.map((ch, i) =>
+        ch.setSource(defaultSources[i]).catch((e) => console.warn(`[hd4] default source ${i + 1}`, e?.message || e)),
+    ))
     multiview.refresh()
+
+    // Unlock audio on the first user gesture (autoplay policy) so the
+    // default camera's audio starts flowing once the user interacts.
+    const unlockAudio = () => {
+        audio.resume()
+        window.removeEventListener('pointerdown', unlockAudio)
+        window.removeEventListener('keydown', unlockAudio)
+    }
+    window.addEventListener('pointerdown', unlockAudio)
+    window.addEventListener('keydown', unlockAudio)
 
     // --- Per-frame loop ---
     const frame = (t) => {

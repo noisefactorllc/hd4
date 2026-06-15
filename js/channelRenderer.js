@@ -88,21 +88,28 @@ export class ChannelRenderer {
 
     /**
      * Upload a frame (HTMLVideoElement / HTMLImageElement / canvas) into
-     * the current program's media() step, and keep imageSize in sync with
-     * the render buffer so the media shader's UV math fills the frame.
+     * the current program's media() step. The source is first fitted into
+     * a channel-aspect buffer (aspect-preserving "cover": fill the frame,
+     * crop the overflow), so a camera or clip of any aspect lands in the
+     * 16:9 channel without stretching. imageSize then matches that buffer,
+     * which equals the output aspect, so the media shader fills cleanly.
      * No-op when the program has no media() step.
      */
     uploadMediaFrame(src) {
         if (this._mediaStep == null || !src) return
+        const sw = src.videoWidth || src.naturalWidth || src.width || 0
+        const sh = src.videoHeight || src.naturalHeight || src.height || 0
+        if (sw === 0 || sh === 0) return
         try {
+            const fit = this._fitToChannel(src, sw, sh)
             this._renderer.updateTextureFromSource(
                 `imageTex_step_${this._mediaStep}`,
-                src,
+                fit,
                 { flipY: false },
             )
-            const w = this.canvas.width
-            const h = this.canvas.height
-            if (w > 0 && h > 0 && (!this._lastSize || this._lastSize[0] !== w || this._lastSize[1] !== h)) {
+            const w = fit.width
+            const h = fit.height
+            if (!this._lastSize || this._lastSize[0] !== w || this._lastSize[1] !== h) {
                 this._renderer.applyStepParameterValues?.({
                     [`step_${this._mediaStep}`]: { imageSize: [w, h] },
                 })
@@ -111,6 +118,28 @@ export class ChannelRenderer {
         } catch {
             // mid-recompile — try again next frame
         }
+    }
+
+    /** Draw `src` into the channel-aspect fit buffer with cover scaling. */
+    _fitToChannel(src, sw, sh) {
+        const dw = this.width
+        const dh = this.height
+        if (!this._fitCanvas) {
+            this._fitCanvas = document.createElement('canvas')
+            this._fitCtx = this._fitCanvas.getContext('2d')
+        }
+        if (this._fitCanvas.width !== dw || this._fitCanvas.height !== dh) {
+            this._fitCanvas.width = dw
+            this._fitCanvas.height = dh
+        }
+        const ctx = this._fitCtx
+        const scale = Math.max(dw / sw, dh / sh)
+        const w = sw * scale
+        const h = sh * scale
+        ctx.fillStyle = '#000'
+        ctx.fillRect(0, 0, dw, dh)
+        ctx.drawImage(src, (dw - w) / 2, (dh - h) / 2, w, h)
+        return this._fitCanvas
     }
 
     start() { this._renderer.start() }

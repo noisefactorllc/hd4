@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: MIT
 /**
- * Built-in shader presets — known-good Noisemaker DSL programs used as
- * channel defaults and as quick picks in the source selector. Pure data,
- * importable anywhere. Verified against the live engine by the
- * integration suite (a preset that fails to compile fails that test).
+ * Built-in shader sources — utility patterns and color fills for a video
+ * mixer (no generative/"noisedeck" effects). The test patterns come from
+ * Noisemaker's synth/testPattern util effect; solids from synth/solid.
+ * Pure data; verified against the live engine by the integration suite.
  */
-export const SHADER_PRESETS = [
-    { name: 'Noise', dsl: 'search synth\nnoise().write(o0)\nrender(o0)' },
-    { name: 'Gradient', dsl: 'search synth\ngradient().write(o0)\nrender(o0)' },
-    { name: 'Blue', dsl: 'search synth\nsolid(color: #4a88fb).write(o0)\nrender(o0)' },
-    { name: 'Amber', dsl: 'search synth\nsolid(color: #f5a623).write(o0)\nrender(o0)' },
-]
+const tp = (pattern) => `search synth\ntestPattern(pattern: ${pattern}).write(o0)\nrender(o0)`
+const solid = (hex) => `search synth\nsolid(color: ${hex}).write(o0)\nrender(o0)`
 
-/** Which preset each channel (1–4) boots with, by index into SHADER_PRESETS. */
-export const DEFAULT_SOURCE_PRESET_INDEX = [0, 1, 2, 3]
+export const SHADER_PRESETS = [
+    { name: 'Color Bars', dsl: tp('colorBars') },
+    { name: 'Checkerboard', dsl: tp('checkerboard') },
+    { name: 'Grid', dsl: tp('gridLines') },
+    { name: 'Black', dsl: solid('#000000') },
+    { name: 'White', dsl: solid('#ffffff') },
+    { name: 'Blue', dsl: solid('#4a88fb') },
+    { name: 'Amber', dsl: solid('#f5a623') },
+]
