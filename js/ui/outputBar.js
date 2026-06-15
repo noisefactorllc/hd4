@@ -8,7 +8,7 @@
  */
 import { VFX, VFX_ORDER } from '../vfx.js'
 
-export function buildOutputBar(container, { onFreeze, onFade, onVfx } = {}) {
+export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill } = {}) {
     container.innerHTML = ''
 
     const brand = document.createElement('div')
@@ -29,6 +29,11 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx } = {}) {
 
     const freeze = toggleButton('FREEZE', onFreeze, 'Freeze the program output (key f)')
     const fade = toggleButton('FADE', onFade, 'Fade the program to black (key b)')
+    const still = toggleButton('STILL', () => {
+        onStill?.()
+        still.setActive(true)
+        setTimeout(() => still.setActive(false), 250) // momentary flash
+    }, 'Capture the program as a still (KEY source / channel image)')
 
     const vfxSelect = document.createElement('select')
     vfxSelect.className = 'hd4-vfx-select'
@@ -41,7 +46,7 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx } = {}) {
     }
     vfxSelect.addEventListener('change', () => onVfx?.(vfxSelect.value))
 
-    group.append(freeze.el, fade.el, vfxSelect)
+    group.append(freeze.el, fade.el, still.el, vfxSelect)
     container.append(brand, spacer, group)
 
     return {

@@ -34,6 +34,9 @@ export function buildMultiview(container, channels, {
         setCameras(list) {
             tiles.forEach((t, i) => { t.updateCameras(list); t.syncSelect(channels[i].source) })
         },
+        setStillAvailable(on) {
+            tiles.forEach((t, i) => { t.setStillAvailable(on); t.syncSelect(channels[i].source) })
+        },
     }
 }
 
@@ -72,6 +75,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
         syncSelect(source) { setSelectValue(picker.select, source) },
         setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
         updateCameras(list) { picker.updateCameras(list) },
+        setStillAvailable(on) { picker.setStillAvailable(on) },
     }
 }
 
@@ -93,7 +97,11 @@ function buildSourcePicker(index, onSelectSource) {
         fileGroup.appendChild(o)
     }
 
-    select.append(camGroup, fileGroup)
+    // Captured still — populated by setStillAvailable once one exists.
+    const captureGroup = document.createElement('optgroup')
+    captureGroup.label = 'Capture'
+
+    select.append(camGroup, fileGroup, captureGroup)
     for (const cat of SOURCE_LIBRARY) {
         const g = document.createElement('optgroup')
         g.label = cat.category
@@ -127,10 +135,24 @@ function buildSourcePicker(index, onSelectSource) {
                 fileInput.value = ''
             }
             fileInput.click()
+        } else if (v === 'still') {
+            onSelectSource?.(index, { type: 'still' })
         } else if (v.startsWith('shader:')) {
             onSelectSource?.(index, { type: 'shader', name: v.slice(7) })
         }
     })
+
+    function setStillAvailable(on) {
+        const has = [...captureGroup.children].some((o) => o.value === 'still')
+        if (on && !has) {
+            const o = document.createElement('option')
+            o.value = 'still'
+            o.textContent = 'Still capture'
+            captureGroup.appendChild(o)
+        } else if (!on && has) {
+            captureGroup.textContent = ''
+        }
+    }
 
     function updateCameras(list) {
         const prev = select.value
@@ -152,7 +174,7 @@ function buildSourcePicker(index, onSelectSource) {
     const control = document.createElement('span')
     control.className = 'hd4-source-control'
     control.append(select, fileInput)
-    return { control, select, updateCameras }
+    return { control, select, updateCameras, setStillAvailable }
 }
 
 /** Reflect the channel's actual source in the picker where we can. */

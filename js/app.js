@@ -27,6 +27,7 @@ import { OutputState } from './outputState.js'
 import { CompositorState } from './compositorState.js'
 import { AudioMixer } from './audio/mixer.js'
 import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
+import { StillStore } from './still.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
@@ -99,12 +100,15 @@ async function boot() {
     state.output = output
     const compositorState = new CompositorState({ channelCount: CHANNEL_COUNT })
     state.compositorState = compositorState
+    const stillStore = new StillStore()
+    state.still = stillStore
 
     // --- Top bar: brand + master output controls ---
     const outputBar = buildOutputBar(document.getElementById('hd4-topbar'), {
         onFreeze: () => output.toggleFreeze(),
         onFade: () => output.toggleFade(now()),
         onVfx: (name) => output.setVfx(name),
+        onStill: () => captureStill(),
     })
 
     // --- Program view + compositor ---
@@ -198,6 +202,14 @@ async function boot() {
     const refreshCameras = async () => { multiview.setCameras(await listCameras()) }
     if (navigator.mediaDevices?.addEventListener) {
         navigator.mediaDevices.addEventListener('devicechange', refreshCameras)
+    }
+
+    // Capture the current program as a still: feeds the KEY "STILL" source
+    // and becomes selectable as a channel image.
+    const captureStill = () => {
+        if (!stillStore.capture(programView.canvas)) return
+        compositor.setStill(stillStore.canvas)
+        multiview.setStillAvailable(true)
     }
 
     // --- Audio mixer panel (channel strips + main) ---
@@ -330,6 +342,8 @@ async function boot() {
         compositor,
         output,
         composition: compositorState,
+        still: stillStore,
+        captureStill,
         audio,
         memory,
         beatClock,
@@ -371,6 +385,8 @@ async function applySourceChoice(index, choice) {
         if (p) await ch.setSource(createSource('shader', { dsl: p.dsl, name: p.name }))
     } else if (choice.type === 'video' || choice.type === 'image') {
         await ch.setSource(createSource(choice.type, { name: choice.file.name }), { file: choice.file })
+    } else if (choice.type === 'still') {
+        if (state.still?.dataUrl) await ch.setSource(createSource('image', { url: state.still.dataUrl, name: 'Still' }))
     }
 }
 
