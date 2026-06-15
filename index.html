@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="color-scheme" content="dark">
+    <title>HD4 — Four-Channel Video Mixer</title>
+    <meta name="description" content="A four-channel software video mixer for the open web. Broadcast-style switcher with an integrated audio mixer, built on Noisemaker and WebAudio.">
+    <meta name="author" content="Noise Factor">
+
+    <link rel="preconnect" href="https://fonts.noisefactor.io" crossorigin>
+    <link rel="preconnect" href="https://shaders.noisedeck.app" crossorigin>
+    <link rel="preconnect" href="https://handfish.noisefactor.io" crossorigin>
+
+    <!-- handfish design language: tokens, base components, utilities. -->
+    <link rel="stylesheet" href="https://handfish.noisefactor.io/0/styles/index.css">
+
+    <!-- Resolve `import ... from 'handfish'` to the CDN bundle (custom elements). -->
+    <script type="importmap">
+        { "imports": { "handfish": "https://handfish.noisefactor.io/0/handfish.esm.min.js" } }
+    </script>
+
+    <!-- Base fonts: blanks (metrics-only, no FOIT) + the real variable fonts. -->
+    <link rel="preload" href="https://fonts.noisefactor.io/fonts/nunito/Nunito-Blank.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="https://fonts.noisefactor.io/fonts/noto-sans-mono/NotoSansMono-Blank.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="https://fonts.noisefactor.io/fonts/material-symbols-outlined/material-symbols-outlined.woff2" as="font" type="font/woff2" crossorigin>
+    <style>
+        @font-face { font-family: 'Nunito Blank';         src: url('https://fonts.noisefactor.io/fonts/nunito/Nunito-Blank.woff2') format('woff2');                     font-weight: 100 900; font-display: block; }
+        @font-face { font-family: 'Noto Sans Mono Blank';  src: url('https://fonts.noisefactor.io/fonts/noto-sans-mono/NotoSansMono-Blank.woff2') format('woff2');       font-weight: 100 900; font-display: block; }
+        @font-face { font-family: Nunito;                  src: url('https://fonts.noisefactor.io/fonts/nunito/Nunito[wght].woff2') format('woff2');                      font-weight: 100 900; font-display: swap; }
+        @font-face { font-family: 'Noto Sans Mono';        src: url('https://fonts.noisefactor.io/fonts/noto-sans-mono/NotoSansMono[wdth,wght].woff2') format('woff2');  font-weight: 100 900; font-display: swap; }
+    </style>
+
+    <link rel="stylesheet" href="css/hd4.css">
+</head>
+<body>
+    <!-- Structural mount points. The UI modules populate these; the
+         layout regions mirror a hardware mixer panel: program on top, source
+         bus alongside, transition + effects, audio mixer at the base. -->
+    <div id="app">
+        <header id="hd4-topbar" class="hd4-topbar"></header>
+        <main id="hd4-stage" class="hd4-stage">
+            <section id="hd4-program" class="hd4-program"></section>
+            <section id="hd4-sources" class="hd4-sources"></section>
+        </main>
+        <section id="hd4-transition" class="hd4-transition"></section>
+        <section id="hd4-mixer" class="hd4-mixer"></section>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

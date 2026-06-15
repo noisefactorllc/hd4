@@ -1,0 +1,61 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * HD4 base layout. Broadcast-industrial: dark, dense, panelized.
+ * All visual values come from handfish --hf-* tokens (token discipline);
+ * the full styling pass lands in the polish phase.
+ */
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    height: 100%;
+}
+
+body {
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-base);
+    color: var(--hf-text-normal);
+    background: var(--hf-bg-base);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+}
+
+#app {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    gap: var(--hf-space-2);
+    padding: var(--hf-space-2);
+}
+
+.hd4-topbar {
+    display: flex;
+    align-items: center;
+    gap: var(--hf-space-3);
+    min-height: var(--hf-titlebar-height);
+}
+
+.hd4-stage {
+    display: grid;
+    grid-template-columns: 1fr minmax(220px, 18vw);
+    gap: var(--hf-space-2);
+    min-height: 0;
+}
+
+.hd4-program,
+.hd4-sources,
+.hd4-transition,
+.hd4-mixer {
+    min-height: 0;
+    border: var(--hf-border-width) solid var(--hf-border);
+    border-radius: var(--hf-radius);
+    background: var(--hf-bg-surface);
+}
+
+.hd4-sources {
+    display: grid;
+    grid-template-rows: repeat(4, 1fr);
+    gap: var(--hf-space-2);
+    padding: var(--hf-space-2);
+}
