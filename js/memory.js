@@ -40,12 +40,13 @@ export class MemoryStore {
     }
 }
 
-export function captureSnapshot({ channels, switcher, output, audio }) {
+export function captureSnapshot({ channels, switcher, output, compositor, audio }) {
     return {
         version: 1,
         channels: channels.map((c) => c.serialize()),
         switcher: { live: switcher.live, type: switcher.type, time: switcher.time },
-        output: { quad: output.quad, vfx: output.vfx },
+        output: { vfx: output.vfx },
+        composition: compositor ? compositor.snapshot() : undefined,
         audio: {
             channels: channels.map((_, i) => ({
                 fader: audio.faderOf(i),
@@ -57,7 +58,7 @@ export function captureSnapshot({ channels, switcher, output, audio }) {
     }
 }
 
-export function applySnapshot(snap, { channels, switcher, output, audio }) {
+export function applySnapshot(snap, { channels, switcher, output, compositor, audio }) {
     if (!snap) return
     if (Array.isArray(snap.channels)) {
         snap.channels.forEach((src, i) => channels[i]?.restore(src))
@@ -68,9 +69,9 @@ export function applySnapshot(snap, { channels, switcher, output, audio }) {
         switcher.cut(snap.switcher.live)
     }
     if (snap.output && output) {
-        output.setQuad(!!snap.output.quad)
         output.setVfx(snap.output.vfx || 'none')
     }
+    if (snap.composition && compositor) compositor.restore(snap.composition)
     if (snap.audio && audio) {
         if (Array.isArray(snap.audio.channels)) {
             snap.audio.channels.forEach((s, i) => {

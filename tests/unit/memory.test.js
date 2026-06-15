@@ -24,7 +24,8 @@ const sampleModulesForCapture = () => ({
         { serialize: () => ({ type: 'camera', deviceId: 'cam-1' }) },
     ],
     switcher: { live: 2, type: 'wipe', time: 1.5 },
-    output: { quad: true, vfx: 'mono' },
+    output: { vfx: 'mono' },
+    compositor: { snapshot: () => ({ composition: 'quad', key: { on: true } }) },
     audio: {
         faderOf: (i) => [0.5, 0.6][i],
         isMuted: (i) => [false, true][i],
@@ -76,7 +77,8 @@ test('captureSnapshot records channels, switcher, output, and audio', () => {
         { type: 'camera', deviceId: 'cam-1' },
     ])
     assert.deepEqual(snap.switcher, { live: 2, type: 'wipe', time: 1.5 })
-    assert.deepEqual(snap.output, { quad: true, vfx: 'mono' })
+    assert.deepEqual(snap.output, { vfx: 'mono' })
+    assert.deepEqual(snap.composition, { composition: 'quad', key: { on: true } })
     assert.deepEqual(snap.audio, {
         channels: [
             { fader: 0.5, muted: false, soloed: true },
@@ -99,8 +101,10 @@ test('applySnapshot drives the live modules with the saved values', () => {
             cut: (n) => calls.push(['cut', n]),
         },
         output: {
-            setQuad: (b) => calls.push(['setQuad', b]),
             setVfx: (v) => calls.push(['setVfx', v]),
+        },
+        compositor: {
+            restore: (c) => calls.push(['restore-comp', c?.composition]),
         },
         audio: {
             setFader: (i, p) => calls.push(['setFader', i, p]),
@@ -116,7 +120,7 @@ test('applySnapshot drives the live modules with the saved values', () => {
     assert.ok(calls.some((c) => c[0] === 'setType' && c[1] === 'wipe'))
     assert.ok(calls.some((c) => c[0] === 'setTime' && c[1] === 1.5))
     assert.ok(calls.some((c) => c[0] === 'cut' && c[1] === 2))
-    assert.ok(calls.some((c) => c[0] === 'setQuad' && c[1] === true))
+    assert.ok(calls.some((c) => c[0] === 'restore-comp' && c[1] === 'quad'))
     assert.ok(calls.some((c) => c[0] === 'setVfx' && c[1] === 'mono'))
     assert.ok(calls.some((c) => c[0] === 'setFader' && c[1] === 1 && c[2] === 0.6))
     assert.ok(calls.some((c) => c[0] === 'setMute' && c[1] === 1 && c[2] === true))

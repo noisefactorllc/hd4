@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 /**
  * Output bar — the top strip: brand plus the master output controls
- * ([QUAD] [FREEZE] [OUTPUT FADE] [VFX]). Toggle buttons call back
- * into the OutputState; setState() reflects the authoritative state each
- * frame so the fade button tracks the ramp.
+ * ([FREEZE] [OUTPUT FADE] [VFX]). Toggle buttons call back into the
+ * OutputState; setState() reflects the authoritative state each frame so the
+ * fade button tracks the ramp. (Composition — QUAD / PinP / SPLIT / KEY —
+ * lives in the composition bar.)
  */
 import { VFX, VFX_ORDER } from '../vfx.js'
 
-export function buildOutputBar(container, { onQuad, onFreeze, onFade, onVfx } = {}) {
+export function buildOutputBar(container, { onFreeze, onFade, onVfx } = {}) {
     container.innerHTML = ''
 
     const brand = document.createElement('div')
@@ -26,7 +27,6 @@ export function buildOutputBar(container, { onQuad, onFreeze, onFade, onVfx } = 
     const group = document.createElement('div')
     group.className = 'hd4-output-group'
 
-    const quad = toggleButton('QUAD', onQuad, 'Composite all four channels (key q)')
     const freeze = toggleButton('FREEZE', onFreeze, 'Freeze the program output (key f)')
     const fade = toggleButton('FADE', onFade, 'Fade the program to black (key b)')
 
@@ -41,12 +41,11 @@ export function buildOutputBar(container, { onQuad, onFreeze, onFade, onVfx } = 
     }
     vfxSelect.addEventListener('change', () => onVfx?.(vfxSelect.value))
 
-    group.append(quad.el, freeze.el, fade.el, vfxSelect)
+    group.append(freeze.el, fade.el, vfxSelect)
     container.append(brand, spacer, group)
 
     return {
-        setState({ quad: q, freeze: f, faded } = {}) {
-            quad.setActive(q)
+        setState({ freeze: f, faded } = {}) {
             freeze.setActive(f)
             fade.setActive(faded)
         },

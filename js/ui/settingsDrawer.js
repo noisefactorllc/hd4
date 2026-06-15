@@ -12,6 +12,8 @@ const SHORTCUTS = [
     ['1–4', 'Take channel'],
     ['c / d / w', 'CUT / MIX / WIPE'],
     ['q', 'QUAD'],
+    ['p', 'PinP'],
+    ['k', 'KEY overlay'],
     ['f', 'FREEZE'],
     ['b', 'FADE to black'],
     ['a', 'AUTO (beat-synced)'],

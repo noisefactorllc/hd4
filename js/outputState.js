@@ -2,16 +2,15 @@
 /**
  * OutputState — the program-output stage flags and the fade ramp.
  *
- * The output controls: [QUAD] (composite all four),
- * [FREEZE] (hold the program), [VFX] (output filter), and [OUTPUT FADE]
- * (fade the program to black). The fade moves at a constant rate
- * (1 / fadeTime per second) and reverses smoothly from its current value.
- * Pure and clock-injected; the compositor reads tick(now) each frame as
- * { quad, freeze, vfx, fade }.
+ * The output controls: [FREEZE] (hold the program), [VFX]
+ * (output filter), and [OUTPUT FADE] (fade the program to black). The fade
+ * moves at a constant rate (1 / fadeTime per second) and reverses smoothly
+ * from its current value. Pure and clock-injected; the compositor reads
+ * tick(now) each frame as { freeze, vfx, fade }. (Composition — QUAD /
+ * PinP / SPLIT / KEY — lives in CompositorState.)
  */
 export class OutputState {
     constructor({ fadeTime = 0.5 } = {}) {
-        this.quad = false
         this.freeze = false
         this.vfx = 'none'
         this._rate = fadeTime > 0 ? 1 / fadeTime : Infinity
@@ -20,9 +19,7 @@ export class OutputState {
         this._lastNow = null
     }
 
-    toggleQuad() { this.quad = !this.quad; return this.quad }
     toggleFreeze() { this.freeze = !this.freeze; return this.freeze }
-    setQuad(on) { this.quad = !!on }
     setVfx(name) { this.vfx = name }
     setFadeTime(seconds) { this._rate = seconds > 0 ? 1 / seconds : Infinity }
 
@@ -45,6 +42,6 @@ export class OutputState {
                 ? Math.min(this._fadeTarget, this._fadeValue + step)
                 : Math.max(this._fadeTarget, this._fadeValue - step)
         }
-        return { quad: this.quad, freeze: this.freeze, vfx: this.vfx, fade: this._fadeValue }
+        return { freeze: this.freeze, vfx: this.vfx, fade: this._fadeValue }
     }
 }

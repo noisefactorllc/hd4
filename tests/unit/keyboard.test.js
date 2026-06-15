@@ -32,6 +32,11 @@ test('q/f/b toggle quad / freeze / fade-to-black; a toggles auto', () => {
     assert.deepEqual(keyToAction('s'), { type: 'settings' })
 })
 
+test('p toggles PinP and k toggles the key overlay', () => {
+    assert.deepEqual(keyToAction('p'), { type: 'pinp' })
+    assert.deepEqual(keyToAction('k'), { type: 'key' })
+})
+
 test('the mapping is case-insensitive', () => {
     assert.deepEqual(keyToAction('C'), { type: 'transitionType', value: 'cut' })
     assert.deepEqual(keyToAction('Q'), { type: 'quad' })

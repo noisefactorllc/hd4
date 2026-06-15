@@ -1,40 +1,30 @@
 // SPDX-License-Identifier: MIT
 /**
- * OutputState — the program-output stage flags ([QUAD] [FREEZE]
+ * OutputState — the program-output stage flags ([FREEZE]
  * [OUTPUT FADE] [VFX]) plus a clock-injected fade ramp. Pure and
- * deterministic; the compositor reads tick(now) each frame.
+ * deterministic; the compositor reads tick(now) each frame. (Composition
+ * — QUAD / PinP / SPLIT / KEY — lives in CompositorState.)
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { OutputState } from '../../js/outputState.js'
 
-test('defaults: no quad, no freeze, vfx none, fade 0', () => {
+test('defaults: no freeze, vfx none, fade 0', () => {
     const o = new OutputState()
-    assert.deepEqual(o.tick(0), { quad: false, freeze: false, vfx: 'none', fade: 0 })
+    assert.deepEqual(o.tick(0), { freeze: false, vfx: 'none', fade: 0 })
 })
 
-test('toggleQuad and toggleFreeze flip and report', () => {
+test('toggleFreeze flips and reports', () => {
     const o = new OutputState()
-    assert.equal(o.toggleQuad(), true)
     assert.equal(o.toggleFreeze(), true)
-    const s = o.tick(0)
-    assert.equal(s.quad, true)
-    assert.equal(s.freeze, true)
-    assert.equal(o.toggleQuad(), false)
+    assert.equal(o.tick(0).freeze, true)
+    assert.equal(o.toggleFreeze(), false)
 })
 
 test('setVfx changes the active effect', () => {
     const o = new OutputState()
     o.setVfx('negative')
     assert.equal(o.tick(0).vfx, 'negative')
-})
-
-test('setQuad sets the quad flag explicitly (for memory recall)', () => {
-    const o = new OutputState()
-    o.setQuad(true)
-    assert.equal(o.tick(0).quad, true)
-    o.setQuad(false)
-    assert.equal(o.tick(0).quad, false)
 })
 
 test('toggleFade ramps to black over the fade time, then holds', () => {

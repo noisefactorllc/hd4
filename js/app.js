@@ -24,6 +24,7 @@ import { buildMultiview } from './ui/multiview.js'
 import { Switcher } from './switcher.js'
 import { ProgramCompositor } from './programCompositor.js'
 import { OutputState } from './outputState.js'
+import { CompositorState } from './compositorState.js'
 import { AudioMixer } from './audio/mixer.js'
 import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
 import { Settings, parseResolution } from './settings.js'
@@ -35,6 +36,7 @@ import { BeatDetector } from './beatDetect.js'
 import { buildProgramView } from './ui/programView.js'
 import { buildTransitionBar } from './ui/transitionBar.js'
 import { buildOutputBar } from './ui/outputBar.js'
+import { buildCompositionBar } from './ui/compositionBar.js'
 import { buildMixerPanel } from './ui/mixerPanel.js'
 import { buildMemoryBar } from './ui/memoryBar.js'
 import { buildAutoBar } from './ui/autoBar.js'
@@ -95,10 +97,11 @@ async function boot() {
     state.switcher = switcher
     const output = new OutputState({ fadeTime: 0.5 })
     state.output = output
+    const compositorState = new CompositorState({ channelCount: CHANNEL_COUNT })
+    state.compositorState = compositorState
 
     // --- Top bar: brand + master output controls ---
     const outputBar = buildOutputBar(document.getElementById('hd4-topbar'), {
-        onQuad: () => output.toggleQuad(),
         onFreeze: () => output.toggleFreeze(),
         onFade: () => output.toggleFade(now()),
         onVfx: (name) => output.setVfx(name),
@@ -111,6 +114,18 @@ async function boot() {
     const compositor = new ProgramCompositor(programView.canvas, { width: PROGRAM_W, height: PROGRAM_H })
     compositor.setChannels(state.channels)
     state.compositor = compositor
+
+    // --- Composition bar (PinP / SPLIT / QUAD / KEY) ---
+    const compositionBar = buildCompositionBar(document.getElementById('hd4-compositor'), {
+        channelCount: CHANNEL_COUNT,
+        onComposition: (mode) => { compositorState.toggleComposition(mode); syncComposition() },
+        onToggleKey: () => { compositorState.toggleKey(); syncComposition() },
+        onPinp: (p) => compositorState.setPinp(p),
+        onSplit: (p) => compositorState.setSplit(p),
+        onKey: (p) => compositorState.setKey(p),
+    })
+    const syncComposition = () => compositionBar.setState(compositorState.snapshot())
+    syncComposition()
 
     // --- Transition bar ---
     const transitionBar = buildTransitionBar(document.getElementById('hd4-transition'), {
@@ -203,12 +218,13 @@ async function boot() {
 
     // --- Memory (8-slot save/recall) ---
     const memory = new MemoryStore(window.localStorage)
-    const modules = { channels: state.channels, switcher, output, audio }
+    const modules = { channels: state.channels, switcher, output, compositor: compositorState, audio }
     const refreshAfterRecall = () => {
         multiview.refresh()
         transitionBar.setType(switcher.type)
         transitionBar.setTime(switcher.time)
         outputBar.setVfx(output.vfx)
+        syncComposition()
         for (let i = 0; i < CHANNEL_COUNT; i++) {
             mixerPanel.setFader(i, audio.faderOf(i))
             mixerPanel.setMuted(i, audio.isMuted(i))
@@ -226,7 +242,9 @@ async function boot() {
     attachKeyboard({
         take: (a) => switcher.take(a.channel, now()),
         transitionType: (a) => { switcher.setType(a.value); transitionBar.setType(a.value) },
-        quad: () => output.toggleQuad(),
+        quad: () => { compositorState.toggleComposition('quad'); syncComposition() },
+        pinp: () => { compositorState.toggleComposition('pinp'); syncComposition() },
+        key: () => { compositorState.toggleKey(); syncComposition() },
         freeze: () => output.toggleFreeze(),
         fade: () => output.toggleFade(now()),
         auto: () => {
@@ -289,10 +307,10 @@ async function boot() {
         }
 
         const pres = switcher.tick(t)
-        const out = output.tick(t)
+        const out = { ...output.tick(t), ...compositorState.snapshot() }
         compositor.draw(pres, switcher.type, out)
         programView.setLive(switcher.live, switcher.transitioning)
-        outputBar.setState({ quad: output.quad, freeze: output.freeze, faded: output.faded })
+        outputBar.setState({ freeze: output.freeze, faded: output.faded })
         for (let i = 0; i < CHANNEL_COUNT; i++) mixerPanel.setMeter(i, audio.getMeter(i))
         mixerPanel.setMainMeter(audio.getMainMeter())
         _rafId = requestAnimationFrame(frame)
@@ -311,6 +329,7 @@ async function boot() {
         switcher,
         compositor,
         output,
+        composition: compositorState,
         audio,
         memory,
         beatClock,
@@ -330,6 +349,12 @@ async function boot() {
             const sx = (q % 2) * hw
             const sy = Math.floor(q / 2) * hh
             return avgColorOf(c, sx + hw * 0.25, sy + hh * 0.25, hw * 0.5, hh * 0.5)
+        },
+        // Average color of a fractional rect of the program (for verifying
+        // PinP / SPLIT / KEY composites). Args are 0..1 of the canvas.
+        sampleProgramRect: (fx, fy, fw, fh) => {
+            const c = programView.canvas
+            return avgColorOf(c, fx * c.width, fy * c.height, fw * c.width, fh * c.height)
         },
     }
 

@@ -59,7 +59,7 @@ test('keyboard shortcuts take channels and toggle quad', async ({ page }) => {
     await page.waitForFunction(() => window.__hd4.switcher.live === 3, null, { timeout: 5_000 })
 
     await page.keyboard.press('q')
-    expect(await page.evaluate(() => window.__hd4.output.quad)).toBe(true)
+    expect(await page.evaluate(() => window.__hd4.composition.composition)).toBe('quad')
     await page.keyboard.press('q')
-    expect(await page.evaluate(() => window.__hd4.output.quad)).toBe(false)
+    expect(await page.evaluate(() => window.__hd4.composition.composition)).toBe('off')
 })

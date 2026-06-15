@@ -21,8 +21,8 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('QUAD composites all four channels into quadrants', async ({ page }) => {
-    await page.click('.hd4-output-btn:has-text("QUAD")')
-    expect(await page.evaluate(() => window.__hd4.output.quad)).toBe(true)
+    await page.click('.hd4-comp-btn:has-text("QUAD")')
+    expect(await page.evaluate(() => window.__hd4.composition.composition)).toBe('quad')
 
     await expect.poll(async () => {
         const [q2, ch3] = await page.evaluate(() => [window.__hd4.sampleProgramQuad(2), window.__hd4.sampleChannelAvg(2)])
