@@ -854,3 +854,62 @@ body {
     font-variant-numeric: tabular-nums;
     color: var(--hf-text-dim);
 }
+
+/* ---- Preview (PVW) monitor + bus ---- */
+.hd4-preview-wrap {
+    flex: none;
+    width: 15rem;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--hf-space-2);
+}
+
+.hd4-preview-screen {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: var(--hf-bg-muted);
+    border: var(--hf-border-width) solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    overflow: hidden;
+}
+
+.hd4-preview-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+.hd4-preview-tag { color: var(--hf-green); }
+
+.hd4-preview-bus { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--hf-space-1); }
+
+.hd4-pvw-btn {
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-sm);
+    font-weight: var(--hf-weight-bold);
+    color: var(--hf-text-dim);
+    background: var(--hf-bg-elevated);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: var(--hf-space-1) 0;
+    cursor: pointer;
+    transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
+}
+.hd4-pvw-btn:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+.hd4-pvw-btn.is-preview {
+    color: var(--hf-bg-base);
+    background: var(--hf-green);
+    border-color: var(--hf-green);
+}
+
+.hd4-preview-take { display: grid; grid-template-columns: 1fr 1fr; gap: var(--hf-space-1); }
+.hd4-preview-action {
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-sm);
+    font-weight: var(--hf-weight-semibold);
+    letter-spacing: var(--hf-tracking-wide);
+    color: var(--hf-text-normal);
+    background: var(--hf-bg-elevated);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    padding: var(--hf-space-1) var(--hf-space-2);
+    cursor: pointer;
+    transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
+}
+.hd4-preview-action:hover { border-color: var(--hf-accent); color: var(--hf-text-bright); }

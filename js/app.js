@@ -22,6 +22,7 @@ import { listCameras } from './sources/cameras.js'
 import { listAudioInputs } from './audioDevices.js'
 import { buildMultiview } from './ui/multiview.js'
 import { Switcher } from './switcher.js'
+import { PreviewBus } from './previewBus.js'
 import { ProgramCompositor } from './programCompositor.js'
 import { OutputState } from './outputState.js'
 import { CompositorState } from './compositorState.js'
@@ -36,6 +37,7 @@ import { BeatClock } from './beatClock.js'
 import { AutoMix } from './autoMix.js'
 import { BeatDetector } from './beatDetect.js'
 import { buildProgramView } from './ui/programView.js'
+import { buildPreviewView } from './ui/previewView.js'
 import { buildTransitionBar } from './ui/transitionBar.js'
 import { buildOutputBar } from './ui/outputBar.js'
 import { buildCompositionBar } from './ui/compositionBar.js'
@@ -115,10 +117,26 @@ async function boot() {
         onRecord: () => toggleRecording(),
     })
 
-    // --- Program view + compositor ---
-    const programView = buildProgramView(document.getElementById('hd4-program'), {
+    // --- Program view + preview bus + compositor ---
+    const previewBus = new PreviewBus({ channelCount: CHANNEL_COUNT, preview: 2 })
+    state.previewBus = previewBus
+    const programEl = document.getElementById('hd4-program')
+    const programView = buildProgramView(programEl, {
         onTake: (i) => switcher.take(i, now()),
     })
+    const takeToProgram = (mode) => {
+        const target = previewBus.take(switcher.live) // flip-flops preview to the outgoing program
+        if (mode === 'cut') switcher.cut(target)
+        else switcher.take(target, now())
+        previewView.setPreview(previewBus.preview)
+    }
+    const previewView = buildPreviewView(programEl, {
+        channelCount: CHANNEL_COUNT,
+        onSelect: (i) => { previewBus.set(i); previewView.setPreview(i) },
+        onTake: () => takeToProgram('cut'),
+        onAuto: () => takeToProgram('auto'),
+    })
+    previewView.setPreview(previewBus.preview)
     const compositor = new ProgramCompositor(programView.canvas, { width: PROGRAM_W, height: PROGRAM_H })
     compositor.setChannels(state.channels)
     state.compositor = compositor
@@ -347,6 +365,7 @@ async function boot() {
         const out = { ...output.tick(t), ...compositorState.snapshot() }
         compositor.draw(pres, switcher.type, out)
         programView.setLive(switcher.live, switcher.transitioning)
+        previewView.drawSource(state.channels[previewBus.preview - 1]?.canvas)
         outputBar.setState({ freeze: output.freeze, faded: output.faded })
         if (recorder.recording) outputBar.setRecording(true, `● ${formatElapsed(recorder.elapsed(t))}`)
         for (let i = 0; i < CHANNEL_COUNT; i++) mixerPanel.setMeter(i, audio.getMeter(i))
@@ -365,6 +384,7 @@ async function boot() {
         channels: state.channels,
         renderers: state.renderers,
         switcher,
+        preview: previewBus,
         compositor,
         output,
         composition: compositorState,
