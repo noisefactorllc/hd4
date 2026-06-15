@@ -19,22 +19,40 @@ switcher.
 
 ## Status
 
-v1 — the core switcher + mixer is built and tested:
+The full feature set is built and tested (215 unit tests + a
+Playwright integration suite).
 
+**Switching & program**
 - **4 channels**, each a camera (pick the **device**), video file, image, or a
   pattern/fill from the source library; **per-channel fit** (scale vs zoom/crop).
-- **Multiview** of all four sources + a **program monitor**.
-- **Fade curves** (linear / dipped / sharp / cut) for transitions and the output fade.
-- **Settings** drawer: output resolution, theme, output-fade time, beat sensitivity.
-- **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**.
-- **QUAD** composite, **FREEZE**, **OUTPUT FADE**, and output **VFX** (negative / mono / sepia).
-- **Audio mixer**: per-channel fader / mute / solo / meter into a main bus (fader + limiter + meter);
-  each channel's audio source is independently selectable — **follow the video, none, or a specific input device**.
-- **8 memory slots** (save / recall the full state, persisted to `localStorage`).
-- **Auto-mixing + beat matching**: tap tempo / BPM, audio tempo detection (SYNC), and beat-synced auto-switching (scan or random, every N bars).
+- **Multiview** of all four sources, a **program monitor**, and a **preview (PVW)**
+  monitor with **TAKE / AUTO**.
+- **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**,
+  **fade curves** (linear / dipped / sharp / cut), and MIX **blend modes** (add / screen / multiply).
 
-Roadmap (PinP / SPLIT / KEY compositing, the full audio channel strip, auto-switching,
-MIDI, recording) and the full design rationale are in
+**Compositing & output**
+- **PinP** (size / shape / border / position / aspect / crop), **SPLIT** (V/H centre &
+  stretch), **QUAD**, and **KEY** (chroma blue/green + luma black/white).
+- **FREEZE**, **OUTPUT FADE**, **STILL** capture (a freeze-frame usable as a KEY source
+  or a channel image), and output **VFX** (negative / mono / sepia / posterize / emboss / find-edges).
+- **Recording** the program (video + audio) to a file via MediaRecorder.
+
+**Audio**
+- Full per-channel strip: **HPF, 3-band EQ, gate, compressor, pan, delay**, plus **AUX / REV sends**.
+- Main bus: **3-band EQ, limiter, reverb** (time / type), **multiband compressor**, and an **AUX bus**.
+- Per-channel **fader / mute / solo / meter**; each channel's audio source is independently
+  selectable — **follow the video, none, or a specific input device**.
+- **Auto-audio**: audio-follows-video, **AUTO MIXING** (level/weight gain sharing), and **VIDEO FOLLOWS AUDIO**.
+
+**Control & state**
+- **Auto-switching + beat matching**: tap tempo / BPM, audio tempo detection (SYNC),
+  beat-synced switching (scan / random / follows-audio).
+- **USER [1–5]** assignable macro buttons and **MIDI** control (learn + map), both persisted.
+- **8 memory slots** (save / recall the full state, persisted to `localStorage`).
+- **Settings** drawer: output resolution, theme, output-fade time, beat sensitivity.
+- handfish design language; broadcast-industrial layout; keyboard shortcuts.
+
+The full design rationale and the per-area implementation notes are in
 [`docs/superpowers/specs/2026-06-14-hd4-design.md`](docs/superpowers/specs/2026-06-14-hd4-design.md).
 
 ## Keyboard
@@ -42,10 +60,11 @@ MIDI, recording) and the full design rationale are in
 | Key | Action | Key | Action |
 |-----|--------|-----|--------|
 | `1`–`4` | Take that channel | `q` | QUAD |
-| `c` | CUT transition | `f` | FREEZE |
-| `d` | MIX (dissolve) | `b` | FADE to black |
-| `w` | WIPE | `a` | AUTO (beat-synced) |
-| | | `s` | Settings |
+| `c` | CUT transition | `p` | PinP |
+| `d` | MIX (dissolve) | `k` | KEY overlay |
+| `w` | WIPE | `f` | FREEZE |
+| `a` | AUTO (beat-synced) | `b` | FADE to black |
+| `s` | Settings | `r` | REC (record) |
 
 ## Develop
 

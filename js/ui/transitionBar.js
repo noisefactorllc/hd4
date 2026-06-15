@@ -89,7 +89,7 @@ export function buildTransitionBar(container, {
     blendLabel.className = 'hd4-section-label'
     blendLabel.textContent = 'BLEND'
     const blend = document.createElement('select')
-    blend.className = 'hd4-curve-select hd4-blend-select'
+    blend.className = 'hd4-blend-select'
     blend.setAttribute('aria-label', 'MIX blend mode')
     for (const name of BLEND_MODES) {
         const o = document.createElement('option')

@@ -595,7 +595,8 @@ body {
 }
 
 /* Transition / fade curve selector */
-.hd4-curve-select {
+.hd4-curve-select,
+.hd4-blend-select {
     font-family: var(--hf-font-family);
     font-size: var(--hf-size-sm);
     color: var(--hf-text-normal);
@@ -605,7 +606,8 @@ body {
     padding: 2px var(--hf-space-1);
     cursor: pointer;
 }
-.hd4-curve-select:hover { border-color: var(--hf-border-hover); }
+.hd4-curve-select:hover,
+.hd4-blend-select:hover { border-color: var(--hf-border-hover); }
 
 /* ---- Settings drawer ---- */
 .hd4-settings-gear {
