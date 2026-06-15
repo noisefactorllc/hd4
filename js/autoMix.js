@@ -14,6 +14,9 @@ export class AutoMix {
         this._rng = rng
         this._enabled = false
         this._lastSwitchBeat = 0
+        // Which channels take part in the auto rotation (default: all).
+        this._included = new Set()
+        for (let i = 1; i <= channelCount; i++) this._included.add(i)
     }
 
     get enabled() { return this._enabled }
@@ -24,6 +27,13 @@ export class AutoMix {
     toggle() { this._enabled = !this._enabled; return this._enabled }
     setMode(m) { this._mode = m === 'random' ? 'random' : 'scan' }
     setBarsPerSwitch(n) { this._barsPerSwitch = Math.max(1, Number(n) || 1) }
+
+    /** Include/exclude a channel from the auto rotation. */
+    setIncluded(channel, on) {
+        if (on) this._included.add(channel)
+        else this._included.delete(channel)
+    }
+    isIncluded(channel) { return this._included.has(channel) }
 
     /** Anchor the bar counter (call when enabling, with the current beatIndex). */
     reset(beatIndex) { this._lastSwitchBeat = beatIndex }
@@ -39,13 +49,20 @@ export class AutoMix {
     }
 
     _pickNext(live) {
-        if (this._mode === 'random') {
-            const candidates = []
-            for (let i = 1; i <= this._channelCount; i++) if (i !== live) candidates.push(i)
-            if (candidates.length === 0) return null
-            const idx = Math.min(candidates.length - 1, Math.floor(this._rng() * candidates.length))
-            return candidates[idx]
+        const others = []
+        for (let i = 1; i <= this._channelCount; i++) {
+            if (this._included.has(i) && i !== live) others.push(i)
         }
-        return (live % this._channelCount) + 1
+        if (others.length === 0) return null // nothing else to switch to
+        if (this._mode === 'random') {
+            const idx = Math.min(others.length - 1, Math.floor(this._rng() * others.length))
+            return others[idx]
+        }
+        // scan: the next included channel after `live`, cyclically.
+        for (let step = 1; step <= this._channelCount; step++) {
+            const c = ((live - 1 + step) % this._channelCount) + 1
+            if (this._included.has(c) && c !== live) return c
+        }
+        return null
     }
 }

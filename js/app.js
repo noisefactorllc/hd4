@@ -176,6 +176,8 @@ async function boot() {
         }),
         onSetFit: (index, mode) => state.renderers[index].setFitMode(mode),
         getFit: (index) => state.renderers[index].fitMode,
+        onSetAutoInclude: (index, on) => autoMix.setIncluded(index + 1, on),
+        getAutoInclude: (index) => autoMix.isIncluded(index + 1),
     })
     const refreshCameras = async () => { multiview.setCameras(await listCameras()) }
     if (navigator.mediaDevices?.addEventListener) {

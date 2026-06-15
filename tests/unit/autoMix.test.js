@@ -58,6 +58,41 @@ test('random picks any channel except the live one', () => {
     assert.equal(a2.onBeat(downbeat(4), 2), 4) // candidates [1,3,4], rng hi → 4
 })
 
+test('channels default to included; setIncluded / isIncluded toggle membership', () => {
+    const a = new AutoMix({ channelCount: 4 })
+    assert.equal(a.isIncluded(1), true)
+    assert.equal(a.isIncluded(4), true)
+    a.setIncluded(2, false)
+    assert.equal(a.isIncluded(2), false)
+})
+
+test('scan skips channels excluded from the auto rotation', () => {
+    const a = new AutoMix({ channelCount: 4, mode: 'scan', barsPerSwitch: 1 })
+    a.setEnabled(true)
+    a.setIncluded(2, false)
+    a.reset(0)
+    assert.equal(a.onBeat(downbeat(4), 1), 3) // 1 → skip 2 → 3
+    assert.equal(a.onBeat(downbeat(8), 3), 4)
+    assert.equal(a.onBeat(downbeat(12), 4), 1)
+})
+
+test('random only picks among included channels', () => {
+    const a = new AutoMix({ channelCount: 4, mode: 'random', barsPerSwitch: 1, rng: () => 0.99 })
+    a.setEnabled(true)
+    a.setIncluded(3, false)
+    a.setIncluded(4, false)
+    a.reset(0)
+    assert.equal(a.onBeat(downbeat(4), 1), 2) // included {1,2}, live 1 → 2
+})
+
+test('no switch when only the live channel remains included', () => {
+    const a = new AutoMix({ channelCount: 4, barsPerSwitch: 1 })
+    a.setEnabled(true)
+    for (const c of [2, 3, 4]) a.setIncluded(c, false)
+    a.reset(0)
+    assert.equal(a.onBeat(downbeat(4), 1), null)
+})
+
 test('setBarsPerSwitch and setMode reconfigure', () => {
     const a = new AutoMix()
     a.setBarsPerSwitch(8)

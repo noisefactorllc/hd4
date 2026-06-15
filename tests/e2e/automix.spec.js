@@ -35,6 +35,24 @@ test('AUTO scans the program through the channels on the beat', async ({ page })
     expect(b).toBe(a) // no further takes while disabled
 })
 
+test('excluding a channel removes it from the AUTO rotation', async ({ page }) => {
+    await page.evaluate(() => {
+        window.__hd4.switcher.setType('cut')
+        window.__hd4.switcher.cut(1)
+        window.__hd4.beatClock.setBpm(300)
+        window.__hd4.autoMix.setBarsPerSwitch(1)
+    })
+    // Exclude channel 2 from the rotation via its tile toggle.
+    await page.click('.hd4-monitor[data-channel="2"] .hd4-auto-include')
+    expect(await page.evaluate(() => window.__hd4.autoMix.isIncluded(2))).toBe(false)
+    await expect(page.locator('.hd4-monitor[data-channel="2"] .hd4-auto-include')).not.toHaveClass(/is-on/)
+
+    await page.click('.hd4-auto-btn') // enable AUTO
+    // From live 1, scan must skip the excluded ch2 and land on 3.
+    await page.waitForFunction(() => window.__hd4.switcher.live === 3, null, { timeout: 8_000 })
+    expect(await page.evaluate(() => window.__hd4.switcher.live)).not.toBe(2)
+})
+
 test('the "a" key toggles AUTO', async ({ page }) => {
     await page.keyboard.press('a')
     expect(await page.evaluate(() => window.__hd4.autoMix.enabled)).toBe(true)

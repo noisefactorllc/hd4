@@ -9,9 +9,17 @@
 import { SOURCE_LIBRARY, presetByDsl } from '../sources/presets.js'
 import { sourceKind } from '../sources/sourceModel.js'
 
-export function buildMultiview(container, channels, { onSelectSource, onSetFit, getFit, cameras = [] } = {}) {
+export function buildMultiview(container, channels, {
+    onSelectSource, onSetFit, getFit, onSetAutoInclude, getAutoInclude, cameras = [],
+} = {}) {
     container.innerHTML = ''
-    const tiles = channels.map((ch, i) => buildTile(ch, i, onSelectSource, onSetFit, getFit ? getFit(i) : 'cover'))
+    const tiles = channels.map((ch, i) => buildTile(ch, i, {
+        onSelectSource,
+        onSetFit,
+        initialFit: getFit ? getFit(i) : 'cover',
+        onSetAutoInclude,
+        initialInclude: getAutoInclude ? getAutoInclude(i) : true,
+    }))
     for (const t of tiles) container.appendChild(t.el)
     tiles.forEach((t) => t.updateCameras(cameras))
 
@@ -29,7 +37,7 @@ export function buildMultiview(container, channels, { onSelectSource, onSetFit, 
     }
 }
 
-function buildTile(channel, index, onSelectSource, onSetFit, initialFit) {
+function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSetAutoInclude, initialInclude }) {
     const el = document.createElement('div')
     el.className = 'hd4-monitor'
     el.dataset.channel = String(channel.id)
@@ -50,11 +58,12 @@ function buildTile(channel, index, onSelectSource, onSetFit, initialFit) {
     label.className = 'hd4-monitor-label'
     label.textContent = channel.label
 
+    const auto = buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude)
     const fit = buildFitToggle(index, onSetFit, initialFit)
     const picker = buildSourcePicker(index, onSelectSource)
     setSelectValue(picker.select, channel.source)
 
-    bar.append(num, label, fit.el, picker.control)
+    bar.append(num, label, auto.el, fit.el, picker.control)
     el.append(screen, bar)
 
     return {
@@ -158,6 +167,25 @@ function setSelectValue(select, source) {
     } else if (source?.type === 'video' || source?.type === 'image') {
         select.value = source.type
     }
+}
+
+/** Toggle whether this channel takes part in AUTO (beat-synced) rotation. */
+function buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude) {
+    let included = initialInclude !== false
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = 'hd4-auto-include'
+    el.textContent = 'A'
+    el.title = 'Include this channel in AUTO rotation'
+    el.setAttribute('aria-label', `Channel ${index + 1} in AUTO rotation`)
+    const render = () => el.classList.toggle('is-on', included)
+    render()
+    el.addEventListener('click', () => {
+        included = !included
+        render()
+        onSetAutoInclude?.(index, included)
+    })
+    return { el }
 }
 
 /** Toggle a media channel between zoom/crop (cover) and scale (contain). */

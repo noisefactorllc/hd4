@@ -712,3 +712,28 @@ body {
     text-align: center;
 }
 .hd4-shortcut span { color: var(--hf-text-dim); }
+
+/* Per-channel AUTO-rotation include toggle (multiview tile) */
+.hd4-auto-include {
+    width: 1.5rem;
+    height: 1.5rem;
+    font-family: var(--hf-font-family);
+    font-size: var(--hf-size-xs);
+    font-weight: var(--hf-weight-bold);
+    color: var(--hf-text-muted);
+    background: var(--hf-bg-surface);
+    border: 1px solid var(--hf-border);
+    border-radius: var(--hf-radius-sm);
+    cursor: pointer;
+    transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
+}
+.hd4-auto-include:hover { border-color: var(--hf-border-hover); color: var(--hf-text-normal); }
+.hd4-auto-include:focus-visible {
+    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
+    outline-offset: var(--hf-focus-ring-offset);
+}
+.hd4-auto-include.is-on {
+    color: var(--hf-bg-base);
+    background: var(--hf-green);
+    border-color: var(--hf-green);
+}
