@@ -2,13 +2,18 @@
 /**
  * ProgramCompositor — owns the 2D program (main output) canvas.
  *
- * Each frame it draws from the switcher's presentation: a single live
- * channel when idle, or a cross-dissolve / wipe between the outgoing and
- * incoming channels during a take. Channel canvases are WebGL surfaces;
- * drawImage reads them into this 2D context (the same pattern visualize's
- * compositor uses). This is also the natural home for the later output
- * stages — QUAD, FREEZE, OUTPUT FADE, VFX.
+ * Two stages:
+ *   1. base  — render the scene (single live channel, a transition, or the
+ *              QUAD composite) into an offscreen buffer, with the VFX
+ *              filter applied. Skipped while FREEZE holds the last frame.
+ *   2. composite — blit the base to the visible canvas, then overlay black
+ *              at the OUTPUT FADE amount.
+ *
+ * Channel canvases are WebGL surfaces; drawImage reads them into 2D (the
+ * same pattern visualize's compositor uses).
  */
+
+import { vfxFilter } from './vfx.js'
 
 /** Pure: decide what to draw this frame from a presentation + transition type. */
 export function transitionPlan(pres, type) {
@@ -26,46 +31,91 @@ export class ProgramCompositor {
         canvas.height = height
         this.ctx = canvas.getContext('2d')
         this._channels = []
+
+        this._base = document.createElement('canvas')
+        this._base.width = width
+        this._base.height = height
+        this._baseCtx = this._base.getContext('2d')
     }
 
     setChannels(channels) { this._channels = channels }
 
-    /** Render one program frame from the switcher presentation + type. */
-    draw(pres, type) {
-        const ctx = this.ctx
+    /** Render one program frame from the switcher presentation + output state. */
+    draw(pres, type, output = {}) {
+        if (!output.freeze) this._renderBase(pres, type, output)
+        this._composite(output)
+    }
+
+    _renderBase(pres, type, output) {
+        const ctx = this._baseCtx
         const w = this.width
         const h = this.height
         ctx.globalAlpha = 1
+        ctx.filter = 'none'
         ctx.fillStyle = '#000'
         ctx.fillRect(0, 0, w, h)
 
+        ctx.filter = vfxFilter(output.vfx || 'none')
+        if (output.quad) this._drawQuad(ctx)
+        else this._drawScene(ctx, pres, type)
+        ctx.filter = 'none'
+    }
+
+    _drawScene(ctx, pres, type) {
+        const w = this.width
+        const h = this.height
         const plan = transitionPlan(pres, type)
         if (plan.kind === 'single') {
-            this._drawChannel(plan.channel)
+            this._blit(ctx, plan.channel, 0, 0, w, h)
         } else if (plan.kind === 'dissolve') {
-            this._drawChannel(plan.from)
+            this._blit(ctx, plan.from, 0, 0, w, h)
             ctx.globalAlpha = plan.mix
-            this._drawChannel(plan.to)
+            this._blit(ctx, plan.to, 0, 0, w, h)
             ctx.globalAlpha = 1
         } else if (plan.kind === 'wipe') {
-            this._drawChannel(plan.from)
+            this._blit(ctx, plan.from, 0, 0, w, h)
             const x = Math.round(w * plan.mix)
             if (x > 0) {
                 ctx.save()
                 ctx.beginPath()
                 ctx.rect(0, 0, x, h)
                 ctx.clip()
-                this._drawChannel(plan.to)
+                this._blit(ctx, plan.to, 0, 0, w, h)
                 ctx.restore()
             }
         }
     }
 
-    _drawChannel(channelNumber) {
+    _drawQuad(ctx) {
+        const hw = this.width / 2
+        const hh = this.height / 2
+        this._blit(ctx, 1, 0, 0, hw, hh)
+        this._blit(ctx, 2, hw, 0, hw, hh)
+        this._blit(ctx, 3, 0, hh, hw, hh)
+        this._blit(ctx, 4, hw, hh, hw, hh)
+    }
+
+    _blit(ctx, channelNumber, x, y, w, h) {
         const ch = this._channels[channelNumber - 1]
         const c = ch?.canvas
-        if (c && c.width > 0 && c.height > 0) {
-            this.ctx.drawImage(c, 0, 0, this.width, this.height)
+        if (c && c.width > 0 && c.height > 0) ctx.drawImage(c, x, y, w, h)
+    }
+
+    _composite(output) {
+        const ctx = this.ctx
+        const w = this.width
+        const h = this.height
+        ctx.globalAlpha = 1
+        ctx.filter = 'none'
+        ctx.clearRect(0, 0, w, h)
+        ctx.drawImage(this._base, 0, 0)
+
+        const fade = output.fade || 0
+        if (fade > 0) {
+            ctx.globalAlpha = Math.min(1, fade)
+            ctx.fillStyle = '#000'
+            ctx.fillRect(0, 0, w, h)
+            ctx.globalAlpha = 1
         }
     }
 
@@ -74,5 +124,7 @@ export class ProgramCompositor {
         this.height = height
         this.canvas.width = width
         this.canvas.height = height
+        this._base.width = width
+        this._base.height = height
     }
 }

@@ -19,8 +19,10 @@ import { SHADER_PRESETS, DEFAULT_SOURCE_PRESET_INDEX } from './sources/presets.j
 import { buildMultiview } from './ui/multiview.js'
 import { Switcher } from './switcher.js'
 import { ProgramCompositor } from './programCompositor.js'
+import { OutputState } from './outputState.js'
 import { buildProgramView } from './ui/programView.js'
 import { buildTransitionBar } from './ui/transitionBar.js'
+import { buildOutputBar } from './ui/outputBar.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -57,9 +59,19 @@ async function boot() {
         state.renderers.push(renderer)
     }
 
-    // --- Switcher (program-bus state machine) ---
+    // --- Switcher (program-bus state machine) + output stage ---
     const switcher = new Switcher({ channelCount: CHANNEL_COUNT, live: 1, type: 'mix', time: 1.0 })
     state.switcher = switcher
+    const output = new OutputState({ fadeTime: 0.5 })
+    state.output = output
+
+    // --- Top bar: brand + master output controls ---
+    const outputBar = buildOutputBar(document.getElementById('hd4-topbar'), {
+        onQuad: () => output.toggleQuad(),
+        onFreeze: () => output.toggleFreeze(),
+        onFade: () => output.toggleFade(now()),
+        onVfx: (name) => output.setVfx(name),
+    })
 
     // --- Program view + compositor ---
     const programView = buildProgramView(document.getElementById('hd4-program'), {
@@ -94,8 +106,10 @@ async function boot() {
     const frame = (t) => {
         for (const ch of state.channels) ch.tick()
         const pres = switcher.tick(t)
-        compositor.draw(pres, switcher.type)
+        const out = output.tick(t)
+        compositor.draw(pres, switcher.type, out)
         programView.setLive(switcher.live, switcher.transitioning)
+        outputBar.setState({ quad: output.quad, freeze: output.freeze, faded: output.faded })
         _rafId = requestAnimationFrame(frame)
     }
     _rafId = requestAnimationFrame(frame)
@@ -111,10 +125,21 @@ async function boot() {
         renderers: state.renderers,
         switcher,
         compositor,
+        output,
         get ready() { return state.ready },
         sampleChannelBrightness: (i) => brightnessOf(state.channels[i]?.canvas),
         sampleChannelAvg: (i) => avgColorOf(state.channels[i]?.canvas),
         sampleProgramAvg: () => avgColorOf(programView.canvas),
+        // Average color of one program quadrant (0=TL,1=TR,2=BL,3=BR) for
+        // verifying the QUAD composite.
+        sampleProgramQuad: (q) => {
+            const c = programView.canvas
+            const hw = c.width / 2
+            const hh = c.height / 2
+            const sx = (q % 2) * hw
+            const sy = Math.floor(q / 2) * hh
+            return avgColorOf(c, sx + hw * 0.25, sy + hh * 0.25, hw * 0.5, hh * 0.5)
+        },
     }
 
     document.dispatchEvent(new CustomEvent('hd4:ready', { detail: { version: VERSION } }))
@@ -137,14 +162,21 @@ function now() {
     return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
 }
 
-/** Downsample a canvas (WebGL or 2D) into a scratch and read its pixels. */
-function readScratch(canvas, w = 16, h = 9) {
+/**
+ * Downsample a canvas (WebGL or 2D), or a source region of it, into a
+ * scratch and read its pixels. Region args are in source pixels.
+ */
+function readScratch(canvas, region = null, w = 16, h = 9) {
     if (!canvas) return null
     const s = document.createElement('canvas')
     s.width = w
     s.height = h
     const ctx = s.getContext('2d')
-    ctx.drawImage(canvas, 0, 0, w, h)
+    if (region) {
+        ctx.drawImage(canvas, region[0], region[1], region[2], region[3], 0, 0, w, h)
+    } else {
+        ctx.drawImage(canvas, 0, 0, w, h)
+    }
     return ctx.getImageData(0, 0, w, h).data
 }
 
@@ -156,8 +188,9 @@ function brightnessOf(canvas) {
     return sum
 }
 
-function avgColorOf(canvas) {
-    const data = readScratch(canvas)
+function avgColorOf(canvas, sx, sy, sw, sh) {
+    const region = (sx !== undefined) ? [sx, sy, sw, sh] : null
+    const data = readScratch(canvas, region)
     if (!data) return [0, 0, 0]
     let r = 0, g = 0, b = 0
     const n = data.length / 4
