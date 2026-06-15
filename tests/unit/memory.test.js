@@ -31,6 +31,7 @@ const sampleModulesForCapture = () => ({
         isMuted: (i) => [false, true][i],
         isSoloed: (i) => [true, false][i],
         mainFader: () => 0.8,
+        stripParams: (i) => ({ pan: [-0.5, 0.5][i], eqHi: 3 }),
     },
 })
 
@@ -81,8 +82,8 @@ test('captureSnapshot records channels, switcher, output, and audio', () => {
     assert.deepEqual(snap.composition, { composition: 'quad', key: { on: true } })
     assert.deepEqual(snap.audio, {
         channels: [
-            { fader: 0.5, muted: false, soloed: true },
-            { fader: 0.6, muted: true, soloed: false },
+            { fader: 0.5, muted: false, soloed: true, strip: { pan: -0.5, eqHi: 3 } },
+            { fader: 0.6, muted: true, soloed: false, strip: { pan: 0.5, eqHi: 3 } },
         ],
         main: 0.8,
     })
@@ -111,6 +112,7 @@ test('applySnapshot drives the live modules with the saved values', () => {
             setMute: (i, b) => calls.push(['setMute', i, b]),
             setSolo: (i, b) => calls.push(['setSolo', i, b]),
             setMainFader: (p) => calls.push(['setMainFader', p]),
+            setStripParams: (i, s) => calls.push(['setStripParams', i, s?.pan]),
         },
     }
     const snap = captureSnapshot(sampleModulesForCapture())
@@ -125,6 +127,7 @@ test('applySnapshot drives the live modules with the saved values', () => {
     assert.ok(calls.some((c) => c[0] === 'setFader' && c[1] === 1 && c[2] === 0.6))
     assert.ok(calls.some((c) => c[0] === 'setMute' && c[1] === 1 && c[2] === true))
     assert.ok(calls.some((c) => c[0] === 'setSolo' && c[1] === 0 && c[2] === true))
+    assert.ok(calls.some((c) => c[0] === 'setStripParams' && c[1] === 1 && c[2] === 0.5))
     assert.ok(calls.some((c) => c[0] === 'setMainFader' && c[1] === 0.8))
 })
 

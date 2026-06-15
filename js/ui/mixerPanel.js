@@ -14,6 +14,7 @@ export function buildMixerPanel(container, {
     onSolo,
     onMainFader,
     onAudioSource,
+    onEditStrip,
 } = {}) {
     container.innerHTML = ''
     const panel = document.createElement('div')
@@ -21,7 +22,7 @@ export function buildMixerPanel(container, {
 
     const strips = []
     for (let i = 0; i < channelCount; i++) {
-        const strip = buildStrip(i, initialFaders[i] ?? 0.8, { onFader, onMute, onSolo, onAudioSource })
+        const strip = buildStrip(i, initialFaders[i] ?? 0.8, { onFader, onMute, onSolo, onAudioSource, onEditStrip })
         panel.appendChild(strip.el)
         strips.push(strip)
     }
@@ -44,7 +45,7 @@ function meterHeight(v) {
     return `${Math.min(100, Math.sqrt(Math.max(0, v)) * 120).toFixed(1)}%`
 }
 
-function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource }) {
+function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource, onEditStrip }) {
     const el = document.createElement('div')
     el.className = 'hd4-strip'
     el.dataset.channel = String(index + 1)
@@ -55,7 +56,8 @@ function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource }) {
     btns.className = 'hd4-strip-btns'
     const solo = stripButton('S', 'hd4-solo-btn', `Solo channel ${index + 1}`, () => onSolo?.(index))
     const mute = stripButton('M', 'hd4-mute-btn', `Mute channel ${index + 1}`, () => onMute?.(index))
-    btns.append(solo, mute)
+    const edit = stripButton('EQ', 'hd4-edit-btn', `Channel ${index + 1} audio setup`, () => onEditStrip?.(index))
+    btns.append(solo, mute, edit)
 
     const faderRow = document.createElement('div')
     faderRow.className = 'hd4-strip-fader-row'

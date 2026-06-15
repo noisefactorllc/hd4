@@ -52,6 +52,7 @@ export function captureSnapshot({ channels, switcher, output, compositor, audio 
                 fader: audio.faderOf(i),
                 muted: audio.isMuted(i),
                 soloed: audio.isSoloed(i),
+                ...(audio.stripParams ? { strip: audio.stripParams(i) } : {}),
             })),
             main: audio.mainFader(),
         },
@@ -78,6 +79,7 @@ export function applySnapshot(snap, { channels, switcher, output, compositor, au
                 audio.setFader(i, s.fader)
                 audio.setMute(i, !!s.muted)
                 audio.setSolo(i, !!s.soloed)
+                if (s.strip && audio.setStripParams) audio.setStripParams(i, s.strip)
             })
         }
         if (typeof snap.audio.main === 'number') audio.setMainFader(snap.audio.main)
