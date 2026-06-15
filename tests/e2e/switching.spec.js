@@ -16,8 +16,8 @@ test.beforeEach(async ({ page }) => {
     await page.waitForFunction(() => window.__hd4.renderers.every((r) => r.isRunning), null, { timeout: 30_000 })
     // Distinct solids on the channels these tests switch to, so program/
     // channel color comparisons are unambiguous.
-    await page.selectOption('.hd4-monitor[data-channel="3"] .hd4-source-select', 'shader:5') // Blue
-    await page.selectOption('.hd4-monitor[data-channel="4"] .hd4-source-select', 'shader:6') // Amber
+    await page.selectOption('.hd4-monitor[data-channel="3"] .hd4-source-select', 'shader:Blue') // Blue
+    await page.selectOption('.hd4-monitor[data-channel="4"] .hd4-source-select', 'shader:Amber') // Amber
     await page.waitForFunction(() => window.__hd4.sampleChannelBrightness(2) > 0 && window.__hd4.sampleChannelBrightness(3) > 0, null, { timeout: 30_000 })
 })
 

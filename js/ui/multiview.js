@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: MIT
 /**
  * Multiview — the four source monitors ([INPUT] view). Each tile
- * shows a channel's live canvas, its number + label, and a source
- * selector (shader presets, camera, or a video/image file). The selector
+ * shows a channel's live canvas, its number + label, a fit toggle (for
+ * media sources), and a categorized source picker: live cameras (one per
+ * device), video/image files, and the pattern/fill library. The picker
  * reports the user's choice via onSelectSource; the app applies it.
  */
-import { SHADER_PRESETS } from '../sources/presets.js'
+import { SOURCE_LIBRARY, presetByDsl } from '../sources/presets.js'
 import { sourceKind } from '../sources/sourceModel.js'
 
-export function buildMultiview(container, channels, { onSelectSource, onSetFit, getFit } = {}) {
+export function buildMultiview(container, channels, { onSelectSource, onSetFit, getFit, cameras = [] } = {}) {
     container.innerHTML = ''
     const tiles = channels.map((ch, i) => buildTile(ch, i, onSelectSource, onSetFit, getFit ? getFit(i) : 'cover'))
     for (const t of tiles) container.appendChild(t.el)
+    tiles.forEach((t) => t.updateCameras(cameras))
 
     return {
         refresh() {
@@ -20,6 +22,9 @@ export function buildMultiview(container, channels, { onSelectSource, onSetFit, 
                 t.syncSelect(channels[i].source)
                 t.setFitVisible(sourceKind(channels[i].source) === 'media')
             })
+        },
+        setCameras(list) {
+            tiles.forEach((t, i) => { t.updateCameras(list); t.syncSelect(channels[i].source) })
         },
     }
 }
@@ -46,17 +51,112 @@ function buildTile(channel, index, onSelectSource, onSetFit, initialFit) {
     label.textContent = channel.label
 
     const fit = buildFitToggle(index, onSetFit, initialFit)
-    const { control, select } = buildSourceSelect(index, onSelectSource)
-    setSelectValue(select, channel.source)
+    const picker = buildSourcePicker(index, onSelectSource)
+    setSelectValue(picker.select, channel.source)
 
-    bar.append(num, label, fit.el, control)
+    bar.append(num, label, fit.el, picker.control)
     el.append(screen, bar)
 
     return {
         el,
         setLabel(text) { label.textContent = text },
-        syncSelect(source) { setSelectValue(select, source) },
+        syncSelect(source) { setSelectValue(picker.select, source) },
         setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
+        updateCameras(list) { picker.updateCameras(list) },
+    }
+}
+
+/** Categorized source picker: cameras (per device) / files / library. */
+function buildSourcePicker(index, onSelectSource) {
+    const select = document.createElement('select')
+    select.className = 'hd4-source-select'
+    select.setAttribute('aria-label', `Channel ${index + 1} source`)
+
+    const camGroup = document.createElement('optgroup')
+    camGroup.label = 'Camera'
+
+    const fileGroup = document.createElement('optgroup')
+    fileGroup.label = 'File'
+    for (const [value, text] of [['video', 'Video file…'], ['image', 'Image file…']]) {
+        const o = document.createElement('option')
+        o.value = value
+        o.textContent = text
+        fileGroup.appendChild(o)
+    }
+
+    select.append(camGroup, fileGroup)
+    for (const cat of SOURCE_LIBRARY) {
+        const g = document.createElement('optgroup')
+        g.label = cat.category
+        for (const item of cat.items) {
+            const o = document.createElement('option')
+            o.value = `shader:${item.name}`
+            o.textContent = item.name
+            g.appendChild(o)
+        }
+        select.appendChild(g)
+    }
+
+    const fileInput = document.createElement('input')
+    fileInput.type = 'file'
+    fileInput.style.display = 'none'
+
+    select.addEventListener('change', () => {
+        const v = select.value
+        if (v === 'camera') {
+            onSelectSource?.(index, { type: 'camera' })
+        } else if (v.startsWith('camera:')) {
+            onSelectSource?.(index, { type: 'camera', deviceId: v.slice(7) })
+        } else if (v === 'video' || v === 'image') {
+            fileInput.accept = v === 'video' ? 'video/*' : 'image/*'
+            fileInput.onchange = () => {
+                const file = fileInput.files?.[0]
+                if (file) {
+                    const type = file.type.startsWith('video/') ? 'video' : 'image'
+                    onSelectSource?.(index, { type, file })
+                }
+                fileInput.value = ''
+            }
+            fileInput.click()
+        } else if (v.startsWith('shader:')) {
+            onSelectSource?.(index, { type: 'shader', name: v.slice(7) })
+        }
+    })
+
+    function updateCameras(list) {
+        const prev = select.value
+        camGroup.textContent = ''
+        const def = document.createElement('option')
+        def.value = 'camera'
+        def.textContent = 'Camera (default)'
+        camGroup.appendChild(def)
+        for (const cam of list || []) {
+            const o = document.createElement('option')
+            o.value = `camera:${cam.deviceId}`
+            o.textContent = cam.label
+            camGroup.appendChild(o)
+        }
+        // Keep the prior selection if it still exists.
+        if ([...select.options].some((o) => o.value === prev)) select.value = prev
+    }
+
+    const control = document.createElement('span')
+    control.className = 'hd4-source-control'
+    control.append(select, fileInput)
+    return { control, select, updateCameras }
+}
+
+/** Reflect the channel's actual source in the picker where we can. */
+function setSelectValue(select, source) {
+    const has = (v) => [...select.options].some((o) => o.value === v)
+    if (source?.type === 'shader') {
+        const preset = presetByDsl(source.dsl)
+        if (preset && has(`shader:${preset.name}`)) select.value = `shader:${preset.name}`
+    } else if (source?.type === 'camera') {
+        const byDevice = `camera:${source.deviceId}`
+        select.value = (source.deviceId && has(byDevice)) ? byDevice : 'camera'
+    } else if (source?.type === 'video' || source?.type === 'image') {
+        select.value = source.type
     }
 }
 
@@ -76,71 +176,4 @@ function buildFitToggle(index, onSetFit, initialMode = 'cover') {
         onSetFit?.(index, mode)
     })
     return { el }
-}
-
-function buildSourceSelect(index, onSelectSource) {
-    const select = document.createElement('select')
-    select.className = 'hd4-source-select'
-    select.setAttribute('aria-label', `Channel ${index + 1} source`)
-
-    const shaderGroup = document.createElement('optgroup')
-    shaderGroup.label = 'Shader'
-    SHADER_PRESETS.forEach((p, pi) => {
-        const o = document.createElement('option')
-        o.value = `shader:${pi}`
-        o.textContent = p.name
-        shaderGroup.appendChild(o)
-    })
-
-    const inputGroup = document.createElement('optgroup')
-    inputGroup.label = 'Input'
-    for (const [value, text] of [['camera', 'Camera'], ['video', 'Video file…'], ['image', 'Image file…']]) {
-        const o = document.createElement('option')
-        o.value = value
-        o.textContent = text
-        inputGroup.appendChild(o)
-    }
-
-    select.append(shaderGroup, inputGroup)
-
-    const fileInput = document.createElement('input')
-    fileInput.type = 'file'
-    fileInput.style.display = 'none'
-
-    select.addEventListener('change', () => {
-        const v = select.value
-        if (v.startsWith('shader:')) {
-            onSelectSource?.(index, { type: 'shader', presetIndex: Number(v.slice(7)) })
-        } else if (v === 'camera') {
-            onSelectSource?.(index, { type: 'camera' })
-        } else if (v === 'video' || v === 'image') {
-            fileInput.accept = v === 'video' ? 'video/*' : 'image/*'
-            fileInput.onchange = () => {
-                const file = fileInput.files?.[0]
-                if (file) {
-                    const type = file.type.startsWith('video/') ? 'video' : 'image'
-                    onSelectSource?.(index, { type, file })
-                }
-                fileInput.value = ''
-            }
-            fileInput.click()
-        }
-    })
-
-    const control = document.createElement('span')
-    control.className = 'hd4-source-control'
-    control.append(select, fileInput)
-    return { control, select }
-}
-
-/** Reflect the channel's actual source in the dropdown where we can. */
-function setSelectValue(select, source) {
-    if (source?.type === 'shader') {
-        const idx = SHADER_PRESETS.findIndex((p) => p.dsl === source.dsl)
-        if (idx >= 0) select.value = `shader:${idx}`
-    } else if (source?.type === 'camera') {
-        select.value = 'camera'
-    } else if (source?.type === 'video' || source?.type === 'image') {
-        select.value = source.type
-    }
 }

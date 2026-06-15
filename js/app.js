@@ -17,7 +17,8 @@ import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
 import { makeChannelDriverFactory } from './sources/driverFactory.js'
 import { createSource } from './sources/sourceModel.js'
-import { SHADER_PRESETS } from './sources/presets.js'
+import { presetByName } from './sources/presets.js'
+import { listCameras } from './sources/cameras.js'
 import { buildMultiview } from './ui/multiview.js'
 import { Switcher } from './switcher.js'
 import { ProgramCompositor } from './programCompositor.js'
@@ -146,10 +147,17 @@ async function boot() {
 
     // --- Multiview (source monitors) ---
     const multiview = buildMultiview(document.getElementById('hd4-sources'), state.channels, {
-        onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => multiview.refresh()),
+        onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => {
+            multiview.refresh()
+            if (choice.type === 'camera') refreshCameras() // re-enumerate for device labels
+        }),
         onSetFit: (index, mode) => state.renderers[index].setFitMode(mode),
         getFit: (index) => state.renderers[index].fitMode,
     })
+    const refreshCameras = async () => { multiview.setCameras(await listCameras()) }
+    if (navigator.mediaDevices?.addEventListener) {
+        navigator.mediaDevices.addEventListener('devicechange', refreshCameras)
+    }
 
     // --- Audio mixer panel (channel strips + main) ---
     const mixerPanel = buildMixerPanel(document.getElementById('hd4-mixer'), {
@@ -201,7 +209,7 @@ async function boot() {
     // test-pattern references. Resilient — a denied camera or missing
     // device must not break boot.
     const shaderSource = (name) => {
-        const p = SHADER_PRESETS.find((x) => x.name === name)
+        const p = presetByName(name)
         return createSource('shader', { dsl: p.dsl, name: p.name })
     }
     const defaultSources = [
@@ -214,6 +222,7 @@ async function boot() {
         ch.setSource(defaultSources[i]).catch((e) => console.warn(`[hd4] default source ${i + 1}`, e?.message || e)),
     ))
     multiview.refresh()
+    refreshCameras() // default camera (ch1) has granted permission → labels available
 
     // Unlock audio on the first user gesture (autoplay policy) so the
     // default camera's audio starts flowing once the user interacts.
@@ -296,10 +305,10 @@ async function applySourceChoice(index, choice) {
     const ch = state.channels[index]
     if (!ch) return
     if (choice.type === 'camera') {
-        await ch.setSource(createSource('camera'))
+        await ch.setSource(createSource('camera', { deviceId: choice.deviceId || '' }))
     } else if (choice.type === 'shader') {
-        const p = SHADER_PRESETS[choice.presetIndex]
-        await ch.setSource(createSource('shader', { dsl: p.dsl, name: p.name }))
+        const p = presetByName(choice.name)
+        if (p) await ch.setSource(createSource('shader', { dsl: p.dsl, name: p.name }))
     } else if (choice.type === 'video' || choice.type === 'image') {
         await ch.setSource(createSource(choice.type, { name: choice.file.name }), { file: choice.file })
     }

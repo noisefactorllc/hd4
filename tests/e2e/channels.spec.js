@@ -77,9 +77,25 @@ test('switching a channel to a camera renders the live (fake) feed', async ({ pa
     expect(await page.evaluate(() => window.__hd4.channels[2].label)).toBe('Camera')
 })
 
+test('the source picker lists camera devices and a channel can pick one', async ({ page }) => {
+    const sel = '.hd4-monitor[data-channel="3"] .hd4-source-select'
+    // ch1 boots as a camera → permission granted → device labels enumerate.
+    await expect.poll(() => page.evaluate((s) => {
+        const el = document.querySelector(s)
+        return [...el.options].filter((o) => o.value.startsWith('camera:')).length
+    }, sel), { timeout: 20_000 }).toBeGreaterThan(0)
+
+    const deviceValue = await page.evaluate((s) => {
+        const el = document.querySelector(s)
+        return [...el.options].find((o) => o.value.startsWith('camera:'))?.value
+    }, sel)
+    await page.selectOption(sel, deviceValue)
+    await page.waitForFunction(() => window.__hd4.channels[2].source.type === 'camera', null, { timeout: 15_000 })
+})
+
 test('switching a channel to a different shader preset updates its label', async ({ page }) => {
     const select = page.locator('.hd4-monitor[data-channel="2"] .hd4-source-select')
-    await select.selectOption('shader:2') // "Grid"
+    await select.selectOption('shader:Grid') // "Grid"
     await page.waitForFunction(() => window.__hd4.channels[1].label === 'Grid', null, { timeout: 15_000 })
     await expect(page.locator('.hd4-monitor[data-channel="2"] .hd4-monitor-label')).toHaveText('Grid')
 })
