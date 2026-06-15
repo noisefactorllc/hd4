@@ -15,6 +15,7 @@
 
 import { vfxFilter } from './vfx.js'
 import { curveFn } from './curves.js'
+import { blendComposite } from './blend.js'
 import { pinpInsetRect, pinpSourceCrop, splitLayout, quadLayout, BORDER_COLORS } from './compositing.js'
 import { applyKey } from './key.js'
 
@@ -36,6 +37,7 @@ export class ProgramCompositor {
         this._channels = []
         this._still = null // captured still (KEY source = STILL)
         this._curve = 'dipped' // easing for dissolve / wipe / fade
+        this._blend = 'mix' // dissolve blend mode
 
         this._base = document.createElement('canvas')
         this._base.width = width
@@ -56,6 +58,9 @@ export class ProgramCompositor {
 
     /** Easing curve for dissolves / wipes / fades (linear|dipped|sharp|cut). */
     setCurve(name) { this._curve = name }
+
+    /** Blend mode for the MIX dissolve (mix|add|screen|multiply). */
+    setBlend(name) { this._blend = name }
 
     /** Render one program frame from the switcher presentation + output state. */
     draw(pres, type, output = {}) {
@@ -95,7 +100,9 @@ export class ProgramCompositor {
         } else if (plan.kind === 'dissolve') {
             this._blit(ctx, plan.from, 0, 0, w, h)
             ctx.globalAlpha = ease(plan.mix)
+            ctx.globalCompositeOperation = blendComposite(this._blend)
             this._blit(ctx, plan.to, 0, 0, w, h)
+            ctx.globalCompositeOperation = 'source-over'
             ctx.globalAlpha = 1
         } else if (plan.kind === 'wipe') {
             this._blit(ctx, plan.from, 0, 0, w, h)

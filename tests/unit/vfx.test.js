@@ -14,6 +14,12 @@ test('vfxFilter maps known effects to canvas filter strings', () => {
     assert.equal(vfxFilter('mono'), 'grayscale(1)')
 })
 
+test('richer effects reference inline SVG filters', () => {
+    assert.equal(vfxFilter('posterize'), 'url(#hd4-vfx-posterize)')
+    assert.equal(vfxFilter('emboss'), 'url(#hd4-vfx-emboss)')
+    assert.equal(vfxFilter('edges'), 'url(#hd4-vfx-edge)')
+})
+
 test('vfxFilter falls back to none for unknown effects', () => {
     assert.equal(vfxFilter('hologram'), 'none')
     assert.equal(vfxFilter(undefined), 'none')

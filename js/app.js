@@ -170,6 +170,7 @@ async function boot() {
         onType: (t) => switcher.setType(t),
         onTime: (s) => switcher.setTime(s),
         onCurve: (c) => compositor.setCurve(c),
+        onBlend: (b) => compositor.setBlend(b),
     })
 
     // --- Auto-mixing + beat matching ---

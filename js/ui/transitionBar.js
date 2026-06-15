@@ -5,14 +5,17 @@
  * how the next take switches; TIME sets the transition duration (0–4 s).
  */
 import { CURVE_ORDER } from '../curves.js'
+import { BLEND_MODES, BLEND_LABELS } from '../blend.js'
 
 export function buildTransitionBar(container, {
     onType,
     onTime,
     onCurve,
+    onBlend,
     initialType = 'mix',
     initialTime = 1.0,
     initialCurve = 'dipped',
+    initialBlend = 'mix',
 } = {}) {
     container.innerHTML = ''
 
@@ -82,7 +85,22 @@ export function buildTransitionBar(container, {
     curve.value = initialCurve
     curve.addEventListener('change', () => onCurve?.(curve.value))
 
-    bar.append(heading, typeGroup, time, curveLabel, curve)
+    const blendLabel = document.createElement('span')
+    blendLabel.className = 'hd4-section-label'
+    blendLabel.textContent = 'BLEND'
+    const blend = document.createElement('select')
+    blend.className = 'hd4-curve-select hd4-blend-select'
+    blend.setAttribute('aria-label', 'MIX blend mode')
+    for (const name of BLEND_MODES) {
+        const o = document.createElement('option')
+        o.value = name
+        o.textContent = BLEND_LABELS[name] || name
+        blend.appendChild(o)
+    }
+    blend.value = initialBlend
+    blend.addEventListener('change', () => onBlend?.(blend.value))
+
+    bar.append(heading, typeGroup, time, curveLabel, curve, blendLabel, blend)
     container.appendChild(bar)
 
     function applyType(value) {
@@ -100,5 +118,6 @@ export function buildTransitionBar(container, {
         setType: applyType,
         setTime: applyTime,
         setCurve: (name) => { curve.value = name },
+        setBlend: (name) => { blend.value = name },
     }
 }

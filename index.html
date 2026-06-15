@@ -41,6 +41,27 @@
     <!-- Structural mount points. The UI modules populate these; the
          layout regions mirror a hardware mixer panel: program on top, source
          bus alongside, transition + effects, audio mixer at the base. -->
+    <!-- VFX filter defs (referenced by the program compositor's canvas filter). -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <defs>
+            <filter id="hd4-vfx-posterize" color-interpolation-filters="sRGB">
+                <feComponentTransfer>
+                    <feFuncR type="discrete" tableValues="0 0.25 0.5 0.75 1"/>
+                    <feFuncG type="discrete" tableValues="0 0.25 0.5 0.75 1"/>
+                    <feFuncB type="discrete" tableValues="0 0.25 0.5 0.75 1"/>
+                </feComponentTransfer>
+            </filter>
+            <filter id="hd4-vfx-emboss" color-interpolation-filters="sRGB">
+                <feConvolveMatrix order="3" preserveAlpha="true" divisor="1"
+                    kernelMatrix="-2 -1 0  -1 1 1  0 1 2"/>
+            </filter>
+            <filter id="hd4-vfx-edge" color-interpolation-filters="sRGB">
+                <feConvolveMatrix order="3" preserveAlpha="true" divisor="1"
+                    kernelMatrix="-1 -1 -1  -1 8 -1  -1 -1 -1"/>
+            </filter>
+        </defs>
+    </svg>
+
     <div id="app">
         <header id="hd4-topbar" class="hd4-topbar"></header>
         <main id="hd4-stage" class="hd4-stage">
