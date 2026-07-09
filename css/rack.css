@@ -1,0 +1,218 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * HD4 rack-mode styling — applied ONLY when HD4 runs inside a Noisedeck Audio
+ * rack slot (the adapter adds `.hd4-rack` to host.container; standalone never
+ * carries it). This file is injected by js/rack-adapter.js AFTER css/hd4.css so
+ * its rules win. It does two jobs:
+ *
+ *   1. Undo the standalone "device slab on a pasteboard" framing (which assumes
+ *      it owns the page <body>) so HD4 sits flush inside the slot mount.
+ *   2. REFLOW HD4's tall portrait faceplate into the wide, short 4U slot band
+ *      (4 × --nd-u-height = 352px tall, full slot width) as a real dashboard —
+ *      NOT a transform-scale. A transform leaves the element's layout box at its
+ *      full unscaled height (so it still overflows the 352px mount) and the
+ *      host's `.nd-slot__mount > * { width:100% !important }` defeats any
+ *      pre-inflated width, stranding the scaled face in the left third of the
+ *      slot. Reflowing makes the faceplate's real box exactly fill the slot:
+ *      full width, height bounded to the band, nothing clipped or scrolled —
+ *      while keeping the program monitor, the four source channels and the key
+ *      live controls (TAKE bus, transition, AUTO, composite modes, mixer)
+ *      legible. The deepest secondary chrome (compositor parameter grid, memory
+ *      bar, USER bar) is hidden on the dense rack face; it stays in the DOM and
+ *      is fully present in the standalone app.
+ *
+ * Everything that styles HD4 is scoped under `.hd4-rack`. The one exception is
+ * the body restoration below: css/hd4.css (which the adapter also injects, for
+ * the component styles the slot needs) carries a global `body { ... }` rule that
+ * assumes it owns the page. Because rack.css is injected AFTER hd4.css, this
+ * equal-specificity `html, body` block lands later and so wins, restoring the
+ * rack host's own page chrome. rack.css is never linked by HD4's standalone
+ * index.html, so the standalone page never sees any of this.
+ */
+
+/* Restore the rack host's page body (undo css/hd4.css's global body rule, which
+   is meant for HD4's own standalone page). Values mirror the rack's
+   rack-host.css; neutral fallbacks keep it sane if a token is briefly missing. */
+html,
+body {
+    min-height: 100vh;
+    display: block;
+    padding: 0;
+    margin: 0;
+    background: var(--nd-rack-bg, #0a0a0b);
+    color: var(--rk-text, #d6d6d6);
+}
+
+/* The slot mount. The faceplate is laid out to fit exactly, so the slot never
+   needs to scroll; hidden keeps any sub-pixel rounding from showing a bar. */
+.hd4-rack {
+    display: block;
+    overflow: hidden;
+}
+
+/* ── The rack faceplate: a wide dashboard sized to the 4U band ────────────────
+   The host forces `width:100% !important` and vertically centres the mount's
+   one child, so the root fills the slot width; we bound its height to the slot
+   (100% of the 352px mount) and lay every region out with one grid. The stage
+   is collapsed to `display:contents` (below) so its two children — the program
+   monitor and the source-channel column — become direct items of THIS grid,
+   alongside the three control panels and the jack strip. `min-height:0` on the
+   root and every row lets the inner monitors / strips shrink to fit.
+
+       columns:  [ program monitor ] [ source channels ] [ control rail ]
+       rows:     topbar (full width)
+                 ┌ compositor ┐  (program + sources span the three
+                 │ transition │   control rows on the left two columns)
+                 └ mixer ──────┘
+                 jacks (full width)                                          */
+.hd4-rack .hd4-rack-root {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: var(--hf-space-1, 4px);
+    gap: var(--hf-space-1, 4px);
+    background: var(--hf-bg-base, #1c1c1c);
+    border-radius: 0;
+    box-shadow: none;
+    overflow: hidden;
+
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(120px, 0.7fr) minmax(330px, 1.1fr);
+    /* topbar · three equal control rows (program + sources span them) · jacks */
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+        "topbar  topbar  topbar"
+        "program sources comp"
+        "program sources trans"
+        "program sources mixer"
+        "jacks   jacks   jacks";
+    /* No transform: the box itself is the right size, so offsetHeight fits. */
+    transform: none;
+}
+
+/* Collapse the stage wrapper so its two children join the root grid directly. */
+.hd4-rack .hd4-stage { display: contents; }
+
+.hd4-rack .hd4-topbar { grid-area: topbar; }
+.hd4-rack .hd4-program { grid-area: program; }
+.hd4-rack .hd4-sources { grid-area: sources; }
+.hd4-rack .hd4-compositor { grid-area: comp; }
+.hd4-rack .hd4-transition { grid-area: trans; }
+.hd4-rack .hd4-mixer { grid-area: mixer; }
+.hd4-rack .hd4-rack-jacks { grid-area: jacks; }
+
+/* Compact top strip — logotype + output/REC + gear on one short line. The big
+   <led-matrix> "HD4 / READY" status splash is a standalone nicety that would
+   eat ~100px of the short band, so it is hidden on the rack face (the readout
+   stays in the DOM + the standalone app). */
+.hd4-rack .hd4-topbar {
+    min-height: 0;
+    padding: 0 var(--hf-space-1, 4px);
+    font-size: var(--hf-size-xs, 11px);
+    gap: var(--hf-space-2, 8px);
+}
+.hd4-rack .hd4-topbar .hf-logotype { font-size: var(--hf-size-sm, 13px); }
+.hd4-rack .hd4-led { display: none; }
+.hd4-rack .hd4-output-btn,
+.hd4-rack .hd4-vfx-select { padding: 2px var(--hf-space-2, 8px); font-size: var(--hf-size-xs, 11px); }
+
+/* ── Program monitor (priority): the big PGM screen + its TAKE bus on the left;
+      the PVW monitor kept beside it but compacted so PGM dominates the cell. ── */
+.hd4-rack .hd4-program {
+    padding: var(--hf-space-1, 4px);
+    gap: var(--hf-space-1, 4px);
+    min-height: 0;
+    overflow: hidden;
+}
+.hd4-rack .hd4-program-wrap { gap: var(--hf-space-1, 4px); min-height: 0; }
+.hd4-rack .hd4-program-screen { min-height: 0; }
+.hd4-rack .hd4-take-bus { gap: var(--hf-space-1, 4px); }
+.hd4-rack .hd4-take-btn {
+    font-size: var(--hf-size-sm, 13px);
+    padding: var(--hf-space-1, 4px) 0;
+}
+
+/* Preview module — narrower on the rack face, anchored to the top so PGM gets
+   the headroom; its screen keeps its 16:9 glass, just smaller. */
+.hd4-rack .hd4-preview-wrap { width: 10rem; gap: var(--hf-space-1, 4px); }
+.hd4-rack .hd4-preview-bus { gap: var(--hf-space-1, 4px); }
+.hd4-rack .hd4-pvw-btn { padding: 2px 0; font-size: var(--hf-size-xs, 11px); }
+.hd4-rack .hd4-preview-take { gap: var(--hf-space-1, 4px); }
+.hd4-rack .hd4-preview-action { padding: 2px var(--hf-space-1, 4px); font-size: var(--hf-size-xs, 11px); }
+
+/* ── Source channels: four compact tiles, stacked, filling the column. ─────── */
+.hd4-rack .hd4-sources {
+    padding: var(--hf-space-1, 4px);
+    gap: var(--hf-space-1, 4px);
+    min-height: 0;
+    overflow: hidden;
+}
+.hd4-rack .hd4-monitor { min-height: 0; }
+.hd4-rack .hd4-monitor-screen { min-height: 22px; } /* keep the thumbnail glass visible */
+.hd4-rack .hd4-monitor-bar {
+    padding: 1px var(--hf-space-1, 4px);
+    gap: var(--hf-space-1, 4px);
+}
+.hd4-rack .hd4-monitor-num,
+.hd4-rack .hd4-monitor-label { font-size: var(--hf-size-xs, 11px); }
+.hd4-rack .hd4-source-select { font-size: var(--hf-size-xs, 11px); padding: 1px var(--hf-space-1, 4px); }
+
+/* ── Control rail: compact the three secondary panels into the right column. ── */
+.hd4-rack .hd4-compositor,
+.hd4-rack .hd4-transition,
+.hd4-rack .hd4-mixer {
+    padding: var(--hf-space-1, 4px) var(--hf-space-2, 8px);
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Composition modes — keep the mode buttons; hide the deep parameter grid on
+   the rack face (it stays in the DOM + the standalone app). */
+.hd4-rack .hd4-composition-bar { gap: var(--hf-space-1, 4px); }
+.hd4-rack .hd4-comp-params { display: none; }
+
+/* Transition + AUTO row — the key live controls; wrap tightly. */
+.hd4-rack .hd4-transition { gap: var(--hf-space-1, 4px) var(--hf-space-2, 8px); }
+.hd4-rack .hd4-transition-bar { gap: var(--hf-space-2, 8px); }
+.hd4-rack .hd4-auto-bar {
+    margin-left: 0;
+    padding-left: var(--hf-space-2, 8px);
+    gap: var(--hf-space-1, 4px);
+}
+
+/* Audio mixer — shrink the tall faders + tighten gaps so the four channel
+   strips + MAIN fit the short, narrow rail. The per-strip EQ (deep editor),
+   per-strip audio-source select and the AUX routing module are de-emphasised
+   off the rack face (all stay in the DOM + the standalone app). */
+.hd4-rack .hd4-mixer-panel { gap: var(--hf-space-1, 4px); align-items: flex-end; height: 100%; }
+.hd4-rack .hd4-strip { padding: 2px; gap: 1px; }
+.hd4-rack .hd4-strip-main { margin-left: var(--hf-space-1, 4px); }
+.hd4-rack .hd4-strip-fader-row { height: 30px; }
+.hd4-rack .hd4-fader { height: 30px; width: 1rem; }
+.hd4-rack .hd4-meter { width: 0.4rem; }
+.hd4-rack .hd4-strip-btns { min-height: 0; gap: 1px; }
+.hd4-rack .hd4-strip-btn { width: 1.15rem; height: 1rem; }
+.hd4-rack .hd4-strip-label { font-size: var(--hf-size-xs, 11px); }
+.hd4-rack .hd4-strip-audio,
+.hd4-rack .hd4-edit-btn,
+.hd4-rack .hd4-aux { display: none; }
+
+/* Hide the deepest secondary chrome on the rack face (still in the DOM, and
+   fully present in the standalone app). */
+.hd4-rack .hd4-memory,
+.hd4-rack .hd4-user-bar { display: none; }
+
+/* The faceplate patch points the adapter appends — keep them readable and on
+   the bottom strip so cables anchor cleanly. */
+.hd4-rack .hd4-rack-jacks {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--hf-space-2, 8px);
+    align-items: center;
+    padding: 2px var(--hf-space-2, 8px);
+    min-height: 0;
+    overflow: hidden;
+}

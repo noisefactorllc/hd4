@@ -77,12 +77,40 @@ const state = {
 
 let _rafId = null
 
+/**
+ * Standalone boot — auto-invoked at module load. Mounts into the page's #app
+ * with the lazy own-context audio mixer routed to the speakers, exactly as
+ * before. This is a thin wrapper so the standalone path is unchanged.
+ */
 async function boot() {
-    const app = document.getElementById('app')
-    if (app) app.dataset.booted = 'true'
+    return bootInto()
+}
 
-    // --- Audio mixer (WebAudio; context created lazily on first source) ---
-    const audio = new AudioMixer({ channelCount: CHANNEL_COUNT })
+/**
+ * bootInto(options) — the full HD4 assembly, parameterized so it can run both
+ * standalone (no options) and as a rack module (container + injected audio).
+ *
+ *   container     mount root (default: the page's #app). All structural
+ *                 #hd4-* lookups are scoped to it, so the rack adapter can
+ *                 build the same scaffold inside a slot.
+ *   audioContext  shared AudioContext to adopt (default: the mixer's own lazy
+ *                 singleton — standalone is byte-for-byte unchanged).
+ *   destination   AudioNode the main/monitor bus feeds into (default:
+ *                 ctx.destination → the speakers).
+ *
+ * Returns the same surface published on window.__hd4 plus a `stop()` to halt
+ * the RAF loop and a `programCanvas` handle (the on-air canvas), so the rack
+ * adapter can expose the program video without reaching into internals.
+ */
+async function bootInto({ container = null, audioContext = null, destination = null } = {}) {
+    const app = container || document.getElementById('app')
+    if (app) app.dataset.booted = 'true'
+    const byId = (id) => app.querySelector('#' + id)
+
+    // --- Audio mixer (WebAudio). Standalone: own context, lazy on first
+    //     source, routed to the speakers. Rack: the injected shared context +
+    //     per-module destination (the single optional-arg integration seam). ---
+    const audio = new AudioMixer({ channelCount: CHANNEL_COUNT, audioContext, destination })
     state.audio = audio
 
     // --- Channels: each a persistent renderer with a pluggable source ---
@@ -125,7 +153,7 @@ async function boot() {
     //     `.hf-topbar` chrome makes the right-aligned cluster (settings + info,
     //     added below) sit upper-right; the MEMORY + MIDI app controls slot in
     //     between the output group and the cluster. ---
-    const topbar = document.getElementById('hd4-topbar')
+    const topbar = byId('hd4-topbar')
     topbar.classList.add('hf-topbar')
     const outputBar = buildOutputBar(topbar, {
         onFreeze: () => { output.toggleFreeze(); showParam('FREEZE', output.freeze ? 'ON' : 'OFF') },
@@ -159,7 +187,7 @@ async function boot() {
     // --- Program view + preview bus + compositor ---
     const previewBus = new PreviewBus({ channelCount: CHANNEL_COUNT, preview: 2 })
     state.previewBus = previewBus
-    const programEl = document.getElementById('hd4-program')
+    const programEl = byId('hd4-program')
     const programView = buildProgramView(programEl, {
         onTake: (i) => switcher.take(i, now()),
     })
@@ -181,7 +209,7 @@ async function boot() {
     state.compositor = compositor
 
     // --- Composition bar (PinP / SPLIT / QUAD / KEY) ---
-    const compositionBar = buildCompositionBar(document.getElementById('hd4-compositor'), {
+    const compositionBar = buildCompositionBar(byId('hd4-compositor'), {
         channelCount: CHANNEL_COUNT,
         onComposition: (mode) => { compositorState.toggleComposition(mode); syncComposition() },
         onToggleKey: () => { compositorState.toggleKey(); syncComposition() },
@@ -193,7 +221,7 @@ async function boot() {
     syncComposition()
 
     // --- Transition bar ---
-    const transitionBar = buildTransitionBar(document.getElementById('hd4-transition'), {
+    const transitionBar = buildTransitionBar(byId('hd4-transition'), {
         initialType: switcher.type,
         initialTime: switcher.time,
         initialCurve: 'dipped',
@@ -211,7 +239,22 @@ async function boot() {
     let lastFollowSwitch = 0
     state.beatClock = beatClock
     state.autoMix = autoMix
-    const autoBar = buildAutoBar(document.getElementById('hd4-transition'), {
+
+    // External-beat sync (rack only). When on, the internal BeatClock no longer
+    // drives the auto-switch from the RAF loop; instead the rack adapter calls
+    // syncToExternalBeat() once per shared transport beat, so HD4's AUTO follows
+    // the rack's tempo and downbeats. Standalone leaves this off and keeps its
+    // own free-running BeatClock — purely additive.
+    let externalBeatMode = false
+    let externalBeatIndex = 0
+    // Run the exact auto-switch step the RAF loop runs on an internal beat, so
+    // the external path and the standalone path share one code path.
+    const applyAutoBeat = (beat, t) => {
+        if (!autoMix.enabled) return
+        const target = autoMix.onBeat(beat, switcher.live)
+        if (target) switcher.take(target, t)
+    }
+    const autoBar = buildAutoBar(byId('hd4-transition'), {
         initialBpm: beatClock.bpm,
         initialBars: autoMix.barsPerSwitch,
         initialMode: autoMix.mode,
@@ -283,7 +326,7 @@ async function boot() {
     applyTheme(settings.get('theme'))
 
     // --- Multiview (source monitors) ---
-    const multiview = buildMultiview(document.getElementById('hd4-sources'), state.channels, {
+    const multiview = buildMultiview(byId('hd4-sources'), state.channels, {
         onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => {
             multiview.refresh()
             if (choice.type === 'camera') refreshCameras() // re-enumerate for device labels
@@ -344,7 +387,7 @@ async function boot() {
     }
 
     // --- Audio mixer panel (channel strips + main) ---
-    const mixerPanel = buildMixerPanel(document.getElementById('hd4-mixer'), {
+    const mixerPanel = buildMixerPanel(byId('hd4-mixer'), {
         channelCount: CHANNEL_COUNT,
         initialFaders: state.channels.map((_, i) => audio.faderOf(i)),
         initialMainFader: audio.mainFader(),
@@ -436,7 +479,7 @@ async function boot() {
     try { savedUser = JSON.parse(window.localStorage.getItem(USER_KEY) || 'null') } catch { savedUser = null }
     const userButtons = new UserButtons({ assignments: Array.isArray(savedUser) ? savedUser : undefined })
     state.userButtons = userButtons
-    const userBar = buildUserBar(document.getElementById('hd4-transition'), {
+    const userBar = buildUserBar(byId('hd4-transition'), {
         count: userButtons.count,
         initial: userButtons.list(),
         onTrigger: (slot) => runUserAction(userButtons.get(slot)),
@@ -551,11 +594,10 @@ async function boot() {
                 if (bpm) autoBar.setBpm(bpm)
             }
         }
-        for (const beat of beatClock.tick(t)) {
-            if (autoMix.enabled) {
-                const target = autoMix.onBeat(beat, switcher.live)
-                if (target) switcher.take(target, t)
-            }
+        // Rack external-beat sync owns the auto-switch cadence; skip the
+        // internal clock's beats then (the adapter calls syncToExternalBeat).
+        if (!externalBeatMode) {
+            for (const beat of beatClock.tick(t)) applyAutoBeat(beat, t)
         }
 
         // VIDEO FOLLOWS AUDIO: take the loudest included input (with a hold).
@@ -588,8 +630,9 @@ async function boot() {
     state.multiview = multiview
     state.ready = true
 
-    // Automation hook — Playwright drives the app through this surface.
-    window.__hd4 = {
+    // Automation hook — Playwright drives the app through this surface. The
+    // rack adapter also reads it (programCanvas, audio, transport-sync hooks).
+    const surface = {
         version: VERSION,
         state,
         led,
@@ -634,9 +677,60 @@ async function boot() {
             const c = programView.canvas
             return avgColorOf(c, fx * c.width, fy * c.height, fw * c.width, fh * c.height)
         },
+
+        // --- Rack integration surface (no effect on standalone behaviour) ---
+
+        // The on-air program canvas — what the recorder captures and what the
+        // rack exposes as the PGM video frameSource.
+        programCanvas: programView.canvas,
+
+        // Toggle external-beat sync. On: the RAF loop stops driving auto-switch
+        // from the internal clock; the host transport does (via syncToExternalBeat).
+        setExternalBeatMode(on) {
+            externalBeatMode = !!on
+            if (externalBeatMode) externalBeatIndex = 0
+        },
+        // Retempo HD4's beat grid + tempo-bar to the host BPM (rack tempo sync).
+        setSyncBpm(bpm) {
+            const n = Number(bpm)
+            if (!Number.isFinite(n) || n <= 0) return
+            beatClock.setBpm(n)
+            autoBar.setBpm(n)
+        },
+        // Called once per shared transport beat: optionally retempo, then run
+        // one auto-switch step against a beat synthesized from a running index
+        // (so AUTO follows the rack's beats/bars exactly like the internal clock).
+        syncToExternalBeat({ bpm } = {}) {
+            if (bpm != null) this.setSyncBpm(bpm)
+            const beatInBar = externalBeatIndex % 4
+            const beat = { beatIndex: externalBeatIndex, beatInBar, isDownbeat: beatInBar === 0, bpm: beatClock.bpm }
+            externalBeatIndex++
+            applyAutoBeat(beat, now())
+        },
+        // Enable AUTO and anchor it (used when slaving to a running transport).
+        enableAuto(on = true) {
+            autoMix.setEnabled(on)
+            if (on) autoMix.reset(externalBeatMode ? externalBeatIndex : beatClock.beatIndex)
+            autoBar.setEnabled(on)
+        },
+
+        // Stop the RAF loop and detach the mixer's bus from its destination.
+        // The rack adapter calls this on unmount; standalone never does.
+        stop() {
+            if (_rafId != null) { cancelAnimationFrame(_rafId); _rafId = null }
+            beatClock.stop()
+            try { audio.dispose() } catch { /* ignore */ }
+            state.ready = false
+        },
     }
 
+    // Publish the automation hook (standalone + e2e depend on it). One HD4 per
+    // page; the rack mounts a single instance, so this remains the live surface.
+    window.__hd4 = surface
+
     document.dispatchEvent(new CustomEvent('hd4:ready', { detail: { version: VERSION } }))
+
+    return surface
 }
 
 async function applySourceChoice(index, choice) {
@@ -729,10 +823,17 @@ function avgColorOf(canvas, sx, sy, sw, sh) {
     return [r / n, g / n, b / n]
 }
 
+// Standalone auto-boot. Guarded on the presence of #app so that importing this
+// module elsewhere (the rack adapter pulls in bootInto) does NOT trigger a boot:
+// the rack page has no #app, and the adapter calls bootInto({ container }) itself.
+// On the standalone page #app is present, so this runs exactly as before.
+function autoBoot() {
+    if (document.getElementById('app')) boot()
+}
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot, { once: true })
+    document.addEventListener('DOMContentLoaded', autoBoot, { once: true })
 } else {
-    boot()
+    autoBoot()
 }
 
-export { state, VERSION }
+export { state, VERSION, bootInto }

@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 /**
- * Boutique form-factor — HD4 presents as a compact, centred "device unit"
- * floating on a darker pasteboard (the Midnight house style), not a
- * full-bleed console that sprawls edge-to-edge across a wide display.
+ * Standalone form-factor — HD4 presents as a single viewport-fitted control
+ * surface with no outer page margin.
  *
  * These are layout invariants of the boutique chrome, checked against the
  * real rendered geometry at a generous viewport.
  */
 import { test, expect } from './fixtures.js'
 
-// A roomy desktop so a full-bleed layout would clearly exceed the unit cap.
+// A roomy desktop so any leftover standalone margin is easy to catch.
 test.use({ viewport: { width: 1600, height: 1200 } })
 
 async function boot(page) {
@@ -17,31 +16,29 @@ async function boot(page) {
     await page.waitForFunction(() => window.__hd4?.ready === true, null, { timeout: 15_000 })
 }
 
-test('renders as a centred, width-capped, compact device unit', async ({ page }) => {
+test('renders as an edge-to-edge viewport-fitted control surface', async ({ page }) => {
     await boot(page)
     const vp = page.viewportSize()
     const box = await page.locator('#app').boundingBox()
+    const scroll = await page.evaluate(() => ({
+        width: document.documentElement.scrollWidth,
+        height: document.documentElement.scrollHeight,
+    }))
 
-    // Capped width — a boutique unit, not edge-to-edge chrome.
-    expect(box.width).toBeLessThanOrEqual(1320)
-    expect(box.width).toBeLessThan(vp.width - 120)
-
-    // Horizontally centred on the pasteboard (left gutter ≈ right gutter).
-    const leftGap = box.x
-    const rightGap = vp.width - (box.x + box.width)
-    expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(6)
-
-    // Compact height — the unit floats, it is not stretched to fill 100vh.
-    expect(box.height).toBeLessThan(vp.height - 60)
+    // Viewport-fitted and marginless: the standalone surface owns the window.
+    expect(scroll.width).toBeLessThanOrEqual(vp.width)
+    expect(scroll.height).toBeLessThanOrEqual(vp.height)
+    expect(box.x).toBeLessThanOrEqual(1)
+    expect(box.y).toBeLessThanOrEqual(1)
+    expect(box.x + box.width).toBeGreaterThanOrEqual(vp.width - 1)
+    expect(box.y + box.height).toBeGreaterThanOrEqual(vp.height - 1)
 })
 
-test('the device panel reads against a distinct pasteboard surface', async ({ page }) => {
+test('the app panel is an opaque surface', async ({ page }) => {
     await boot(page)
-    const { bodyBg, appBg } = await page.evaluate(() => ({
-        bodyBg: getComputedStyle(document.body).backgroundColor,
+    const { appBg } = await page.evaluate(() => ({
         appBg: getComputedStyle(document.getElementById('app')).backgroundColor,
     }))
-    // The panel is a real (opaque) surface, distinct from the pasteboard.
+    // The panel is a real opaque surface.
     expect(appBg).not.toBe('rgba(0, 0, 0, 0)')
-    expect(appBg).not.toBe(bodyBg)
 })

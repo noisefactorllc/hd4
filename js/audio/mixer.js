@@ -21,9 +21,17 @@ import { autoMixGains } from './autoAudio.js'
 const SMOOTH_TC = 0.01
 
 export class AudioMixer {
-    constructor({ channelCount = 4 } = {}) {
+    constructor({ channelCount = 4, audioContext = null, destination = null } = {}) {
         this.channelCount = channelCount
-        this._ctx = null
+        // Rack integration: an externally-supplied AudioContext is adopted
+        // instead of the lazy singleton, and the main/monitor bus is routed
+        // into `_destination` (the rack's per-module destination) rather than
+        // the speakers. Standalone passes neither, so `_ctx` stays lazy and the
+        // bus routes to `ctx.destination` — byte-for-byte the previous graph.
+        this._ctx = audioContext || null
+        this._injectedCtx = audioContext || null
+        this._destNode = destination || null
+        this._graphBuilt = false
         this._strips = Array.from({ length: channelCount }, () => ({
             fader: 0.8,
             muted: false,
@@ -69,14 +77,22 @@ export class AudioMixer {
         this._lastInputLevels = []
     }
 
-    get enabled() { return !!this._ctx }
+    get enabled() { return !!this._ctx && this._graphBuilt }
     get context() { return this._ctx }
 
+    /** The node the main/monitor bus feeds into (rack destination, or speakers). */
+    get _destination() { return this._destNode || this._ctx.destination }
+
     ensureContext() {
-        if (this._ctx) return this._ctx
-        const Ctx = window.AudioContext || window.webkitAudioContext
-        this._ctx = new Ctx()
+        // Build the graph exactly once, against either the injected context
+        // (rack) or a freshly created lazy singleton (standalone).
+        if (this._graphBuilt) return this._ctx
+        if (!this._ctx) {
+            const Ctx = window.AudioContext || window.webkitAudioContext
+            this._ctx = new Ctx()
+        }
         this._buildGraph()
+        this._graphBuilt = true
         return this._ctx
     }
 
@@ -295,7 +311,17 @@ export class AudioMixer {
 
     dispose() {
         for (const strip of this._strips) this._clearDevice(strip)
+        if (this._injectedCtx) {
+            // Rack: the context is host-owned and shared across modules, so we
+            // must NOT close it. Instead detach our bus from the shared
+            // destination so this module stops feeding the rack mix.
+            const dest = this._destNode
+            try { this._main.analyser?.disconnect(dest) } catch { /* not connected */ }
+            try { this._auxChain?.mute?.disconnect(dest) } catch { /* not connected */ }
+            return
+        }
         if (this._ctx) { try { this._ctx.close() } catch { /* ignore */ } this._ctx = null }
+        this._graphBuilt = false
     }
 
     _buildGraph() {
@@ -317,7 +343,7 @@ export class AudioMixer {
         mEqHi.connect(limiter) // default: MB comp bypassed
         limiter.connect(muteGain)
         muteGain.connect(mainAnalyser)
-        mainAnalyser.connect(ctx.destination)
+        mainAnalyser.connect(this._destination)
 
         // Multiband compressor sub-graph (3 crossover bands, bypassed until on).
         const mbInput = ctx.createGain()
@@ -484,13 +510,14 @@ export class AudioMixer {
         this._monitor = next
         this.ensureContext()
         const ctx = this._ctx
+        const dest = this._destination
         const main = this._main.analyser
         const aux = this._auxChain?.mute
         if (!ctx || !main || !aux) return next
-        try { main.disconnect(ctx.destination) } catch { /* was not connected */ }
-        try { aux.disconnect(ctx.destination) } catch { /* was not connected */ }
-        if (next === 'aux') aux.connect(ctx.destination)
-        else main.connect(ctx.destination)
+        try { main.disconnect(dest) } catch { /* was not connected */ }
+        try { aux.disconnect(dest) } catch { /* was not connected */ }
+        if (next === 'aux') aux.connect(dest)
+        else main.connect(dest)
         return next
     }
 

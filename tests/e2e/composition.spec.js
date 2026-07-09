@@ -9,6 +9,11 @@
 import { test, expect } from './fixtures.js'
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+const SOLIDS = {
+    green: [0x46, 0xa7, 0x58],
+    blue: [0x4a, 0x88, 0xfb],
+    amber: [0xf5, 0xa6, 0x23],
+}
 
 test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -18,7 +23,14 @@ test.beforeEach(async ({ page }) => {
     await page.selectOption('.hd4-monitor[data-channel="2"] .hd4-source-select', 'shader:Green')
     await page.selectOption('.hd4-monitor[data-channel="3"] .hd4-source-select', 'shader:Blue')
     await page.selectOption('.hd4-monitor[data-channel="4"] .hd4-source-select', 'shader:Amber')
-    await page.waitForFunction(() => [1, 2, 3].every((i) => window.__hd4.sampleChannelBrightness(i) > 0), null, { timeout: 30_000 })
+    await page.waitForFunction((targets) => {
+        const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+        return [
+            [1, targets.green],
+            [2, targets.blue],
+            [3, targets.amber],
+        ].every(([i, target]) => d(window.__hd4.sampleChannelAvg(i), target) < 45)
+    }, SOLIDS, { timeout: 30_000 })
     // Blue is the live program background.
     await page.evaluate(() => { window.__hd4.switcher.setType('cut'); window.__hd4.switcher.cut(3) })
 })
