@@ -60,6 +60,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
     const label = document.createElement('span')
     label.className = 'hd4-monitor-label'
     label.textContent = channel.label
+    label.title = channel.label
 
     const auto = buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude)
     const fit = buildFitToggle(index, onSetFit, initialFit)
@@ -71,7 +72,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
 
     return {
         el,
-        setLabel(text) { label.textContent = text },
+        setLabel(text) { label.textContent = text; label.title = text },
         syncSelect(source) { setSelectValue(picker.select, source) },
         setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
         updateCameras(list) { picker.updateCameras(list) },
@@ -159,7 +160,9 @@ function buildSourcePicker(index, onSelectSource) {
         camGroup.textContent = ''
         const def = document.createElement('option')
         def.value = 'camera'
-        def.textContent = 'Camera (default)'
+        // Short label: the picker is width-constrained and sits inside the
+        // 'Camera' optgroup, which already supplies the context.
+        def.textContent = 'Camera'
         camGroup.appendChild(def)
         for (const cam of list || []) {
             const o = document.createElement('option')
@@ -189,6 +192,8 @@ function setSelectValue(select, source) {
     } else if (source?.type === 'video' || source?.type === 'image') {
         select.value = source.type
     }
+    // The picker is width-constrained; surface the full choice on hover.
+    select.title = select.selectedOptions[0]?.textContent || ''
 }
 
 /** Toggle whether this channel takes part in AUTO (beat-synced) rotation. */

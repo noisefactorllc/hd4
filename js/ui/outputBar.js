@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: MIT
 /**
- * Output bar — the top strip: the HD4 logotype plus the master output
- * controls ([FREEZE] [OUTPUT FADE] [VFX]). The logotype uses
- * handfish's industrial `.hf-logotype` wordmark; the container is the
- * `.hf-topbar` so the normalized cluster (settings + info, appended by the
- * app) aligns to the right. Toggle buttons call back into the OutputState;
+ * Output bar — the top strip: the HD4 brand plus the master output
+ * controls ([FREEZE] [OUTPUT FADE] [VFX]). The brand is the inline
+ * instant_mix mark (js/ui/logo.js) riding handfish's industrial
+ * `.hf-logotype` wordmark; the container is the `.hf-topbar` so the
+ * normalized cluster (settings + info, appended by the app) aligns right. Toggle buttons call back into the OutputState;
  * setState() reflects the authoritative state each frame so the fade button
  * tracks the ramp. (Composition — QUAD / PinP / SPLIT / KEY — lives in the
  * composition bar.)
  */
 import { VFX, VFX_ORDER } from '../vfx.js'
+import { logoSvg } from './logo.js'
 
 export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord } = {}) {
     container.innerHTML = ''
 
     const logo = document.createElement('div')
     logo.className = 'hf-logotype'
-    logo.textContent = 'HD4'
+    logo.innerHTML = logoSvg('hd4-logo-mark')
+    logo.append('HD4')
 
     const group = document.createElement('div')
     group.className = 'hd4-output-group'

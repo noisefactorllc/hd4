@@ -60,8 +60,13 @@ test('SPLIT shows the live channel and the B source side by side', async ({ page
         return dist(left, blue) // left half = Blue (live)
     }, { timeout: 15_000 }).toBeLessThan(40)
 
-    const [right, amber] = await page.evaluate(() => [window.__hd4.sampleProgramRect(0.82, 0.4, 0.1, 0.2), window.__hd4.sampleChannelAvg(3)])
-    expect(dist(right, amber)).toBeLessThan(40) // right half = Amber (B)
+    // Poll (not one-shot): the left-half check can pass while the canvas still
+    // shows the previous composition — left is Blue under PinP too — so only
+    // the right half proves the split redraw actually landed.
+    await expect.poll(async () => {
+        const [right, amber] = await page.evaluate(() => [window.__hd4.sampleProgramRect(0.82, 0.4, 0.1, 0.2), window.__hd4.sampleChannelAvg(3)])
+        return dist(right, amber) // right half = Amber (B)
+    }, { timeout: 15_000 }).toBeLessThan(40)
 })
 
 test('SPLIT region A honors an in-flight transition (dissolves, not a hard cut)', async ({ page }) => {

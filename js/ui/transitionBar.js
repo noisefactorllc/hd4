@@ -98,7 +98,16 @@ export function buildTransitionBar(container, {
     blend.value = initialBlend
     blend.addEventListener('change', () => onBlend?.(blend.value))
 
-    bar.append(heading, typeGroup, time, curveLabel, curve, blendLabel, blend)
+    // Label+select pairs are glued into groups so the row's space-between
+    // distribution can never split a label from its control.
+    const curveGroup = document.createElement('div')
+    curveGroup.className = 'hd4-ctl-group'
+    curveGroup.append(curveLabel, curve)
+    const blendGroup = document.createElement('div')
+    blendGroup.className = 'hd4-ctl-group'
+    blendGroup.append(blendLabel, blend)
+
+    bar.append(heading, typeGroup, time, curveGroup, blendGroup)
     container.appendChild(bar)
 
     function applyType(value) {

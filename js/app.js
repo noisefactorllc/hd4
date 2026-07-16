@@ -17,6 +17,7 @@
 // (select-dropdown, slider-value, tempo-bar) and provides the About dialog +
 // tooltip initializer for the industrial top bar.
 import { AboutDialog, initializeTooltips } from 'handfish'
+import { logoSvg } from './ui/logo.js'
 import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
 import { makeChannelDriverFactory } from './sources/driverFactory.js'
@@ -297,6 +298,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // bar last (after MEMORY + MIDI) so it aligns right via margin-left:auto.
     const about = new AboutDialog({
         name: 'HD4',
+        logo: logoSvg(),
         version: VERSION,
         tagline: 'video mixer',
         repo: 'noisefactorllc/hd4',
@@ -479,7 +481,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
     try { savedUser = JSON.parse(window.localStorage.getItem(USER_KEY) || 'null') } catch { savedUser = null }
     const userButtons = new UserButtons({ assignments: Array.isArray(savedUser) ? savedUser : undefined })
     state.userButtons = userButtons
-    const userBar = buildUserBar(byId('hd4-transition'), {
+    // USER macros render as a module on the mixer row's right flank.
+    const userBar = buildUserBar(byId('hd4-mixer'), {
         count: userButtons.count,
         initial: userButtons.list(),
         onTrigger: (slot) => runUserAction(userButtons.get(slot)),

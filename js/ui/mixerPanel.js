@@ -113,10 +113,15 @@ function buildAudioSelect(index, onAudioSource) {
             el.appendChild(o)
         }
         if ([...el.options].some((o) => o.value === prev)) el.value = prev
+        syncTitle()
     }
     rebuild()
 
+    // Device names clip in the narrow strip; surface the full name on hover.
+    function syncTitle() { el.title = el.selectedOptions[0]?.textContent || 'Audio source' }
+
     el.addEventListener('change', () => {
+        syncTitle()
         const v = el.value
         if (v === 'follow') onAudioSource?.(index, 'follow')
         else if (v === 'none') onAudioSource?.(index, 'none')
