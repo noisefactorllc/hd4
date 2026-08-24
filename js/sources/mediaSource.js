@@ -20,11 +20,18 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
     let stream = null
     let audioStream = null
     let objectUrl = null
+    // start() is async but Channel._releaseDriver() calls stop() synchronously,
+    // so a source swap can land in any of the awaits below. Anything acquired
+    // after that point belongs to nobody: a camera whose tracks are never
+    // stopped keeps the hardware light on for the rest of the session.
+    let stopped = false
 
     async function start() {
         await renderer.compile(MEDIA_DSL)
+        if (stopped) return
         if (kind === 'camera') {
             await startCamera()
+            if (stopped) release()
         } else if (kind === 'video') {
             startVideoFile(ctx.runtime?.file)
         } else if (kind === 'image') {
@@ -40,15 +47,18 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
             audio: false,
         }
         stream = await navigator.mediaDevices.getUserMedia(constraints)
+        if (stopped) return
         video = makeHiddenVideo(true)
         video.srcObject = stream
         await video.play().catch(() => { /* autoplay may need a retry */ })
+        if (stopped) return
 
         // Best-effort audio on a separate stream so a missing mic can't
         // break the video path.
         if (audio) {
             try {
                 audioStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                if (stopped) return
                 await audio.connectStream(audioStream)
             } catch { audioStream = null }
         }
@@ -84,6 +94,12 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
     }
 
     function stop() {
+        stopped = true
+        release()
+    }
+
+    /** Release every resource acquired so far. Safe to call repeatedly. */
+    function release() {
         if (audio) { try { audio.disconnect() } catch { /* ignore */ } }
         stopTracks(stream); stream = null
         stopTracks(audioStream); audioStream = null
