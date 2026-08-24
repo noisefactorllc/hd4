@@ -24,7 +24,16 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
     // so a source swap can land in any of the awaits below. Anything acquired
     // after that point belongs to nobody: a camera whose tracks are never
     // stopped keeps the hardware light on for the rest of the session.
+    //
+    // Drivers are single-use — Channel.setSource() builds a fresh one per swap
+    // — so this latch is never cleared. Restarting a stopped driver is a no-op
+    // by design.
     let stopped = false
+    // ctx.audio.disconnect() is channel-wide: it clears whatever the strip is
+    // following, whoever attached it. Only release the binding if this driver
+    // is the one that made it, or a late teardown will silently mute the
+    // source that replaced us.
+    let audioAttached = false
 
     async function start() {
         await renderer.compile(MEDIA_DSL)
@@ -60,7 +69,12 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
                 audioStream = await navigator.mediaDevices.getUserMedia({ audio: true })
                 if (stopped) return
                 await audio.connectStream(audioStream)
-            } catch { audioStream = null }
+                audioAttached = true
+            } catch {
+                // A mic we acquired but could not route is still a live mic.
+                stopTracks(audioStream)
+                audioStream = null
+            }
         }
     }
 
@@ -73,7 +87,17 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
         video = makeHiddenVideo(false)
         video.src = src
         video.loop = true
-        if (audio) { try { audio.connectElement(video) } catch { /* ignore */ } }
+        if (audio) {
+            // Async in the mixer (it awaits ctx.resume()), so a stop() can land
+            // between the call and the binding taking effect. Track it rather
+            // than firing and forgetting.
+            Promise.resolve(audio.connectElement(video))
+                .then(() => {
+                    audioAttached = true
+                    if (stopped) release()
+                })
+                .catch(() => { /* the video path works without audio */ })
+        }
         video.play().catch(() => {})
     }
 
@@ -100,7 +124,10 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
 
     /** Release every resource acquired so far. Safe to call repeatedly. */
     function release() {
-        if (audio) { try { audio.disconnect() } catch { /* ignore */ } }
+        if (audio && audioAttached) {
+            try { audio.disconnect() } catch { /* ignore */ }
+            audioAttached = false
+        }
         stopTracks(stream); stream = null
         stopTracks(audioStream); audioStream = null
         if (video) {

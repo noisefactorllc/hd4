@@ -14,8 +14,19 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 function installBrowserStubs() {
+    const control = { play: null } // a test can hold play() open
     const appended = []
     const elements = []
+    const created = []
+    const revoked = []
+    // Node's real URL.createObjectURL only accepts a Blob; the driver is handed
+    // a File by the picker, which these tests stand in for with a plain object.
+    URL.createObjectURL = () => {
+        const url = `blob:hd4-test-${created.length}`
+        created.push(url)
+        return url
+    }
+    URL.revokeObjectURL = (u) => revoked.push(u)
     Object.defineProperty(globalThis, 'document', {
         configurable: true,
         writable: true,
@@ -24,7 +35,7 @@ function installBrowserStubs() {
                 const el = {
                     style: {}, srcObject: null, src: '', readyState: 0,
                     paused: false, removed: false,
-                    play: async () => {},
+                    play: () => control.play ?? Promise.resolve(),
                     pause() { this.paused = true },
                     remove() {
                         this.removed = true
@@ -38,7 +49,7 @@ function installBrowserStubs() {
             body: { appendChild(el) { appended.push(el) } },
         },
     })
-    return { appended, elements }
+    return { appended, elements, created, revoked, control }
 }
 
 function fakeStream(label) {
@@ -48,9 +59,9 @@ function fakeStream(label) {
 
 /** A promise plus the handle to settle it later. */
 function deferred() {
-    let resolve, reject
-    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
-    return { promise, resolve, reject }
+    let resolve
+    const promise = new Promise((res) => { resolve = res })
+    return { promise, resolve }
 }
 
 function installMediaDevices(getUserMedia) {
@@ -60,12 +71,23 @@ function installMediaDevices(getUserMedia) {
     })
 }
 
+/**
+ * Models mixer.js closely enough to catch ownership mistakes: one strip per
+ * channel, a single `followSource`, and a `disconnect()` that is channel-wide
+ * (_clearFollow) rather than per-driver. connectElement is async because the
+ * real one awaits ctx.resume().
+ */
 function makeAudioSpy() {
     return {
-        connected: [], elements: [], disconnects: 0,
-        async connectStream(s) { this.connected.push(s) },
-        connectElement(el) { this.elements.push(el) },
-        disconnect() { this.disconnects++ },
+        connected: [], elements: [], disconnects: 0, log: [], followSource: null,
+        async connectStream(s) {
+            this.log.push('connectStream'); this.connected.push(s); this.followSource = s
+        },
+        async connectElement(el) {
+            await null
+            this.log.push('connectElement'); this.elements.push(el); this.followSource = el
+        },
+        disconnect() { this.log.push('disconnect'); this.disconnects++; this.followSource = null },
     }
 }
 
@@ -92,6 +114,9 @@ test('a camera stopped while getUserMedia is pending does not leave the camera r
 
     assert.equal(stream.tracks[0].stopped, true, 'the acquired camera track must be stopped')
     assert.deepEqual(dom.appended, [], 'no hidden video element may be left in the document')
+    // Not merely detached afterwards: a dead driver should never have built
+    // and played an element for a channel the user has already left.
+    assert.deepEqual(dom.elements, [], 'no element should have been created at all')
 })
 
 test('a camera stopped during the compile never acquires a stream at all', async () => {
@@ -149,25 +174,34 @@ test('a video file stopped during the compile leaves no element or object URL', 
     const renderer = { compile: () => compile.promise, uploadMediaFrame() {} }
     const audio = makeAudioSpy()
 
-    const revoked = []
-    const realCreate = URL.createObjectURL
-    const realRevoke = URL.revokeObjectURL
-    URL.createObjectURL = () => 'blob:hd4-test'
-    URL.revokeObjectURL = (u) => revoked.push(u)
-    try {
-        const driver = makeMediaDriver({ type: 'video' }, renderer, { audio, runtime: { file: {} } })
-        const started = driver.start()
-        driver.stop()
-        compile.resolve()
-        await started
+    const driver = makeMediaDriver({ type: 'video' }, renderer, { audio, runtime: { file: {} } })
+    const started = driver.start()
+    driver.stop()
+    compile.resolve()
+    await started
 
-        assert.deepEqual(dom.appended, [], 'no hidden video element may be left in the document')
-        assert.deepEqual(audio.elements, [], 'a stopped driver must not connect audio to the mixer')
-        assert.equal(revoked.length === 0 || revoked[0] === 'blob:hd4-test', true, 'any object URL created must be revoked')
-    } finally {
-        URL.createObjectURL = realCreate
-        URL.revokeObjectURL = realRevoke
-    }
+    assert.deepEqual(dom.appended, [], 'no hidden video element may be left in the document')
+    assert.deepEqual(dom.elements, [], 'no element should have been created at all')
+    assert.deepEqual(dom.created, [], 'no object URL should have been created at all')
+    assert.deepEqual(audio.elements, [], 'a stopped driver must not connect audio to the mixer')
+})
+
+test('a video file stopped after it starts revokes the object URL it created', async () => {
+    // The mirror of the test above: here the URL genuinely exists, so the
+    // revocation is a real assertion rather than a vacuously satisfied one.
+    const dom = installBrowserStubs()
+    installMediaDevices(async () => fakeStream('unused'))
+    const renderer = { compile: async () => {}, uploadMediaFrame() {} }
+
+    const driver = makeMediaDriver({ type: 'video' }, renderer, { runtime: { file: {} } })
+    await driver.start()
+    assert.equal(dom.created.length, 1, 'the object URL was created')
+    assert.equal(dom.appended.length, 1, 'the hidden video element was attached')
+
+    driver.stop()
+
+    assert.deepEqual(dom.revoked, dom.created, 'every object URL created must be revoked')
+    assert.deepEqual(dom.appended, [], 'the element must be detached')
 })
 
 test('stop is idempotent', async () => {
@@ -201,4 +235,96 @@ test('an uninterrupted camera start still acquires and plays', async () => {
     assert.equal(dom.appended[0].srcObject, stream)
     assert.deepEqual(audio.connected, [micStream], 'the mic reaches the mixer')
     assert.equal(stream.tracks[0].stopped, false, 'a live driver keeps its tracks')
+})
+
+test('a driver resuming after stop does not disconnect its successor\'s audio', async () => {
+    // The channel's audio binding is channel-wide: disconnect() clears
+    // whatever the strip currently follows, whoever put it there. A driver
+    // that resumes after teardown must not reach for it.
+    installBrowserStubs()
+    const camStream = fakeStream('camera')
+    const gum = deferred()
+    installMediaDevices(() => gum.promise)
+    const audio = makeAudioSpy()
+    const renderer = { compile: async () => {}, uploadMediaFrame() {} }
+
+    const a = makeMediaDriver({ type: 'camera' }, renderer, { audio })
+    const startedA = a.start()
+    await null; await null
+    a.stop() // user swaps the channel while the permission prompt is up
+
+    const b = makeMediaDriver({ type: 'video' }, renderer, { audio, runtime: { file: {} } })
+    await b.start()
+    const successorSource = audio.followSource
+    assert.notEqual(successorSource, null, 'the successor connected its audio')
+
+    gum.resolve(camStream) // the abandoned camera finally arrives
+    await startedA
+
+    assert.equal(camStream.tracks[0].stopped, true, 'the abandoned camera is still released')
+    assert.equal(audio.followSource, successorSource, "the successor's audio must survive")
+})
+
+test('a video file stopped while its audio is still binding does not leave the mixer attached', async () => {
+    // audio.connectElement is async (the real one awaits ctx.resume()), so a
+    // stop() can land between the call and the binding taking effect.
+    installBrowserStubs()
+    installMediaDevices(async () => fakeStream('unused'))
+    const audio = makeAudioSpy()
+    const renderer = { compile: async () => {}, uploadMediaFrame() {} }
+
+    const driver = makeMediaDriver({ type: 'video' }, renderer, { audio, runtime: { file: {} } })
+    const started = driver.start()
+    await null; await null // reach into startVideoFile's connectElement
+    driver.stop()
+    await started
+    await null; await null; await null // let the binding settle
+
+    assert.equal(audio.followSource, null, 'a torn-down driver must not hold the strip')
+})
+
+test('a mic that fails to reach the mixer is still released', async () => {
+    // connectStream rejecting must not discard the only reference to a live
+    // microphone stream — that is the same orphaned-hardware bug in miniature.
+    installBrowserStubs()
+    const camStream = fakeStream('camera')
+    const micStream = fakeStream('mic')
+    installMediaDevices((c) => Promise.resolve(c.audio === true ? micStream : camStream))
+    const audio = makeAudioSpy()
+    audio.connectStream = async () => { throw new Error('no audio context') }
+    const renderer = { compile: async () => {}, uploadMediaFrame() {} }
+
+    const driver = makeMediaDriver({ type: 'camera' }, renderer, { audio })
+    await driver.start()
+
+    assert.equal(micStream.tracks[0].stopped, true, 'the acquired mic must be released')
+})
+
+test('a camera stopped while the element is still playing never asks for the mic', async () => {
+    // Without the guard after play(), a driver the user already navigated away
+    // from goes on to raise a microphone permission prompt and light the mic
+    // for a dead channel — cleaned up a moment later, but asked for regardless.
+    const dom = installBrowserStubs()
+    const camStream = fakeStream('camera')
+    const micStream = fakeStream('mic')
+    const requests = []
+    installMediaDevices((c) => {
+        requests.push(c.audio === true ? 'mic' : 'camera')
+        return Promise.resolve(c.audio === true ? micStream : camStream)
+    })
+    const play = deferred()
+    dom.control.play = play.promise
+    const renderer = { compile: async () => {}, uploadMediaFrame() {} }
+    const audio = makeAudioSpy()
+
+    const driver = makeMediaDriver({ type: 'camera' }, renderer, { audio })
+    const started = driver.start()
+    await null; await null; await null // park inside play()
+
+    driver.stop()
+    play.resolve()
+    await started
+
+    assert.deepEqual(requests, ['camera'], 'the mic must never be requested')
+    assert.equal(camStream.tracks[0].stopped, true, 'the camera is released')
 })
