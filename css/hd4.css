@@ -20,10 +20,74 @@
 
     /* ── Standalone viewport tokens ─────────────────────────────────────────
        HD4 fills the browser window edge-to-edge while preserving the dense
-       hardware-panel spacing inside the app surface. */
-    --hd4-unit-max: 105rem;            /* edge-to-edge up to a dense console width; wider viewports centre the unit */
+       hardware-panel spacing inside the app surface.
+
+       The width cap used to be 105rem, which pillarboxed a 1920px window with
+       ~240px of pasteboard — and because the monitors are 16:9, the width it
+       withheld was also height they could not earn, so the same cap left the
+       stage holding surplus it had no way to spend. Only a genuinely enormous
+       display centres the unit now. */
+    --hd4-unit-max: 160rem;
     --hd4-unit-pad: 0;                 /* no outer standalone margin */
-    --hd4-gap: clamp(2px, 0.5vh, 5px);       /* gap between modules */
+
+    /* ── Density scale ──────────────────────────────────────────────────────
+       One four-step scale for every gap and pad in the app. handfish's own
+       scale (4/8/12/16) is too loose for a hardware-panel surface, so this is
+       its dense sibling — but it is still a *scale*: nothing in HD4 may
+       invent a one-off 3px/5px/7px/9px value. Steps, and what each one means:
+
+         tight (2px)  inside one control (a button row's own gap)
+         base  (4px)  the default — panel padding, grid gaps, sibling controls
+         group (6px)  between labelled control groups on a row
+         section (10px) between logical sections that also carry a divider
+
+       Buttons share one padding pair so every control on the panel presents
+       the same hit box. */
+    --hd4-space-tight: 2px;
+    --hd4-space: 4px;
+    --hd4-space-group: 6px;
+    --hd4-space-section: 10px;
+    --hd4-btn-pad: 4px 8px;
+    --hd4-bus-h: 2.4rem;               /* PGM take bus / PVW TAKE+AUTO row */
+
+    /* ── Stage height ───────────────────────────────────────────────────────
+       The stage's monitors are 16:9 boxes whose height is set by their width,
+       so the stage can only ever spend a height its own width has earned.
+       Handing it more (it used to be the grid's 1fr row, i.e. every pixel
+       nothing else claimed) does not enlarge a monitor — the surplus just
+       pools as dead space, which is what put a grey band inside PVW and a gap
+       under PGM. So the height is derived here instead, and the mixer takes
+       what is left: faders can always spend height, monitors cannot.
+
+       Derivation, mirroring the boxes below: the source column and the gaps
+       come off the app width, the remainder splits 1.3 : 1 between PGM and
+       PVW, and PGM's share sets the screen height that the take bus and the
+       section's padding sit under. */
+    --hd4-sources-w: clamp(15rem, 18vw, 20rem);
+    --hd4-program-w: calc(
+        (min(100vw, var(--hd4-unit-max))
+            - var(--hd4-sources-w)
+            - var(--hd4-gap)                    /* stage column gap */
+            - 2 * var(--hd4-space)              /* .hd4-program padding */
+            - var(--hd4-space-group)            /* PGM|PVW gap */
+        ) * 1.3 / 2.3);
+    --hd4-stage-h: calc(
+        var(--hd4-program-w) * 9 / 16           /* PGM screen, 16:9 */
+        + var(--hd4-space)                      /* screen -> take bus gap */
+        + var(--hd4-bus-h)
+        + 2 * var(--hd4-space));                /* .hd4-program padding */
+
+    /* The mixer's floor: one channel strip's stacked contents at the fader's
+       own minimum — audio picker, S/M/EQ, fader, label, and the strip's and
+       the mixer's padding. Below this the mixer would clip its own controls,
+       so the stage's monitors give up height first. */
+    --hd4-mixer-min: 10rem;
+
+    /* Left/right gutter shared by every full-width control row (topbar,
+       compositor, transition) so their section labels align in one column. */
+    --hd4-gutter: var(--hd4-space-group);
+
+    --hd4-gap: var(--hd4-space);       /* gap between app modules */
 
     /* Body fallback behind the app surface. */
     --hd4-pasteboard: color-mix(in srgb, var(--hf-bg-base, #1c1c1c) 74%, #000);
@@ -69,7 +133,17 @@ body {
     --hf-radius: 0;
     --hf-radius-sm: 0;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+    /* topbar / stage / compositor / transition / mixer. The stage absorbs the
+       spare height; the mixer's fader column is sized (--hd4-fader-h) so that
+       what reaches the stage is close to what its two 16:9 monitors can spend.
+       The stage cannot be the auto row instead: the source column's canvases
+       give it an intrinsic height that grid will not shrink, so it overflows a
+       short viewport. */
+    /* The mixer floors at --hd4-mixer-min, so on a short window the stage's
+       monitors give up height before the mixer clips its own controls. (The
+       floor has to be explicit: .hd4-mixer is overflow:hidden, which zeroes
+       the automatic minimum an `auto` track min would otherwise resolve to.) */
+    grid-template-rows: auto minmax(0, var(--hd4-stage-h)) auto auto minmax(var(--hd4-mixer-min), 1fr);
     gap: var(--hd4-gap);
     padding: var(--hd4-unit-pad);
     background: var(--hf-bg-base);
@@ -83,8 +157,8 @@ body {
    margin-left:auto). hd4-specific padding only. */
 .hd4-topbar {
     min-height: 0;
-    padding: 0 var(--hf-space-1);
-    gap: var(--hf-space-2);
+    padding: var(--hd4-space-tight) var(--hd4-gutter);
+    gap: var(--hd4-space-group);
     flex-wrap: nowrap;
     overflow: hidden;
     /* Spread the control groups across the full bar instead of letting the
@@ -94,27 +168,34 @@ body {
 .hd4-topbar .hf-topbar-cluster { margin-left: 0; }
 
 /* Brand: the inline instant_mix mark rides the wordmark's cap height. */
-.hd4-topbar .hf-logotype { display: inline-flex; align-items: center; gap: 7px; }
+.hd4-topbar .hf-logotype { display: inline-flex; align-items: center; gap: var(--hd4-space-group); }
 .hd4-logo-mark { width: 1.25em; height: 1.25em; flex: none; }
 
 .hd4-output-group {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--hd4-space);
     flex: none;
     min-width: 0;
 }
 
+/* The readout is a 128x32 dot grid that scales to fit its box: the component
+   picks one cell size from min((w-8)/128, (h-8)/32), so at 132px wide the
+   width is always the binding constraint and every pixel of box height past
+   ~40px rendered as empty bezel. It used to be 64px tall, which made the LED —
+   not any control — set the top bar's height and cost 24px off the top of the
+   app. 40px is the exact height at which the dot grid is still width-bound,
+   so the readout renders identically in a bar that now fits its controls. */
 .hd4-led {
     flex: 0 0 132px;
     width: 132px;
-    height: 64px;
+    height: 40px;
     overflow: hidden;
 }
 
 .hd4-led canvas {
     width: 132px;
-    height: 64px;
+    height: 40px;
     display: block;
 }
 
@@ -127,7 +208,7 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 4px 9px;
+    padding: var(--hd4-btn-pad);
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
@@ -158,14 +239,15 @@ body {
     /* 7.2rem: the widest option still fits, and the transport group clears
        the 1280px topbar without clipping. */
     max-width: 7.2rem;
-    padding: 3px var(--hf-space-1);
+    padding: var(--hd4-space) var(--hd4-space);
     cursor: pointer;
 }
 .hd4-vfx-select:hover { background: var(--hf-bg-muted); }
 
 .hd4-stage {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(15rem, 18vw, 20rem);
+    /* Keep in step with --hd4-sources-w, which --hd4-stage-h derives from. */
+    grid-template-columns: minmax(0, 1fr) var(--hd4-sources-w);
     gap: var(--hd4-gap);
     /* The stage is the flexible row in the viewport-bounded app grid. */
     height: auto;
@@ -184,21 +266,24 @@ body {
 }
 
 /* ---- Program monitor + take bus ---- */
-.hd4-program { display: flex; gap: 8px; padding: 4px; }
+.hd4-program { display: flex; gap: var(--hd4-space-group); padding: var(--hd4-space); }
 
 .hd4-program-wrap {
-    /* PGM dominates the stage but leaves the PVW column real width (3:2). */
-    flex: 1.5 1 0;
+    /* PGM stays the dominant monitor, but not by so much that the PVW
+       column is left holding height it cannot fill (see the app grid note). */
+    flex: 1.3 1 0;
     min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--hd4-space);
 }
 
 .hd4-program-screen {
     position: relative;
-    flex: 1;
+    flex: 0 1 auto;
+    aspect-ratio: 16 / 9;
+    max-height: 52vh;
     min-height: 0;
     background: var(--hf-bg-muted);
     border: var(--hf-border-width) solid transparent;
@@ -228,7 +313,7 @@ body {
     letter-spacing: var(--hf-tracking-wide);
     color: var(--hf-red);
     background: color-mix(in srgb, #000 55%, transparent);
-    padding: 2px var(--hf-space-2);
+    padding: var(--hd4-space-tight) var(--hd4-space-group);
     border-radius: var(--hf-radius-sm);
     pointer-events: none;
 }
@@ -236,8 +321,12 @@ body {
 .hd4-take-bus {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
+    gap: var(--hd4-space);
     flex: none;
+    /* Pinned to the column's foot so it lands on the same line as the PVW
+       column's TAKE / AUTO. */
+    margin-top: auto;
+    min-height: var(--hd4-bus-h);
 }
 
 .hd4-take-btn {
@@ -248,7 +337,7 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 5px 0;
+    padding: var(--hd4-space) 0;
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
@@ -281,12 +370,12 @@ body {
        shrinkable AUTO cluster could never prevent the second line. Everything
        here compresses gracefully down to the 1280px floor. */
     flex-wrap: nowrap;
-    gap: 4px;
+    gap: var(--hd4-space);
     /* One distribution context: both logical clusters render display:contents,
        so every control group is a direct item and slack spreads evenly across
        the whole row. */
     justify-content: space-between;
-    padding: 4px 6px;
+    padding: var(--hd4-space) var(--hd4-gutter);
     /* Must stay visible: the AUTO <select-dropdown> popup extends past the row,
        and an overflow-hidden box still scrolls when the focused option is
        brought into view — which scrolls the whole row's controls out of sight. */
@@ -310,7 +399,7 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 4px 9px;
+    padding: var(--hd4-btn-pad);
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
@@ -358,7 +447,7 @@ body {
     color: var(--hf-text-dim);
 }
 
-.hd4-trans-types { display: flex; gap: var(--hf-space-1); }
+.hd4-trans-types { display: flex; gap: var(--hd4-space); }
 
 .hd4-trans-btn {
     font-family: var(--hf-font-family);
@@ -369,7 +458,7 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 4px 8px;
+    padding: var(--hd4-btn-pad);
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
@@ -387,7 +476,7 @@ body {
 }
 
 .hd4-time,
-.hd4-ctl-group { display: flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; }
+.hd4-ctl-group { display: flex; align-items: center; gap: var(--hd4-space-group); flex: 0 1 auto; min-width: 0; }
 /* TIME is a handfish <slider-value> (display:contents). The scrub keeps a
    steady 160px basis (shrinkable to 80px at the 1280 floor) so row slack goes
    to the even space-between gaps instead of inflating the slider.
@@ -402,8 +491,8 @@ body {
 .hd4-sources {
     display: grid;
     grid-template-rows: repeat(4, 1fr);
-    gap: 4px;
-    padding: 4px;
+    gap: var(--hd4-space);
+    padding: var(--hd4-space);
 }
 
 /* Source monitor tile */
@@ -437,8 +526,8 @@ body {
 .hd4-monitor-bar {
     display: flex;
     align-items: center;
-    gap: 3px;
-    padding: 3px 4px;
+    gap: var(--hd4-space);
+    padding: var(--hd4-space-tight) var(--hd4-space);
     background: var(--hf-bg-elevated);
     border-top: var(--hf-border-width) solid transparent;
 }
@@ -482,7 +571,7 @@ body {
     background: var(--hf-bg-surface);
     border: var(--hf-border-width) solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 2px var(--hf-space-1);
+    padding: var(--hd4-space-tight) var(--hd4-space);
     cursor: pointer;
 }
 
@@ -496,14 +585,14 @@ body {
 .hd4-mixer {
     display: flex;
     align-items: stretch;
-    gap: 6px;
-    padding: 4px;
+    gap: var(--hd4-space-group);
+    padding: var(--hd4-space);
     overflow: hidden;
 }
 
 .hd4-mixer-panel {
     display: flex;
-    gap: 8px;
+    gap: var(--hd4-space-group);
     /* stretch (not flex-end): every module spans the row's full height, so
        MAIN/AUX don't notch the top edge. */
     align-items: stretch;
@@ -518,8 +607,11 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
-    gap: 4px;
-    padding: 5px 7px;
+    gap: var(--hd4-space);
+    padding: var(--hd4-space) var(--hd4-space-group);
+    /* Span the mixer row so the fader column can grow into it. */
+    height: 100%;
+    min-height: 0;
     /* Strips share the row's width up to a sane console-strip cap. */
     flex: 1 1 0;
     min-width: 5rem;
@@ -537,7 +629,7 @@ body {
     margin-left: auto;
 }
 
-.hd4-strip-btns { display: flex; gap: 4px; min-height: 1.4rem; }
+.hd4-strip-btns { display: flex; gap: var(--hd4-space); min-height: 1.4rem; }
 
 .hd4-strip-btn {
     width: 1.45rem;
@@ -562,12 +654,18 @@ body {
 
 .hd4-strip-fader-row {
     display: flex;
-    gap: 5px;
+    gap: var(--hd4-space);
     align-items: stretch;
-    /* Height must stay definite (viewport-driven): an auto-height chain here
-       feeds back into the app grid's auto mixer row and balloons it until the
-       1fr stage collapses to zero. */
-    height: clamp(70px, 10.8vh, 124px);
+    /* (Historic hazard: when the mixer was the grid's auto row, an intrinsic
+       height here fed back into the grid and ballooned the row until the 1fr
+       stage collapsed to zero.) The mixer is the grid's 1fr row now, so its
+       height comes from above and the fader column can simply grow into it —
+       growing inside a definite row cannot feed back. The cap keeps a tall
+       window from drawing a two-foot fader; past it the strip's space-between
+       spreads the remainder through the strip instead. */
+    flex: 1 1 auto;
+    min-height: 60px;
+    max-height: 22rem;
 }
 
 .hd4-meter {
@@ -611,7 +709,7 @@ body {
 
 /* ---- AUX module: monitor / record routing for the AUX bus ---- */
 .hd4-aux {
-    margin-left: 4px;
+    margin-left: var(--hd4-space);
     /* Second auto margin: row slack splits evenly around the master pair
        ([CH1-4] — [MAIN AUX] — [USER]) instead of pooling in one gap. */
     margin-right: auto;
@@ -621,14 +719,14 @@ body {
 .hd4-aux-btns {
     flex-direction: column;
     align-items: stretch;
-    gap: var(--hf-space-1);
+    gap: var(--hd4-space);
     min-height: 0;
 }
 .hd4-aux-mon,
 .hd4-aux-recsrc {
     width: auto;
     min-width: 2.8rem;
-    padding: 2px var(--hf-space-2);
+    padding: var(--hd4-space-tight) var(--hd4-space-group);
 }
 .hd4-aux-mon.is-active,
 .hd4-aux-recsrc.is-active {
@@ -644,8 +742,8 @@ body {
 .hd4-memory {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding-left: 10px;
+    gap: var(--hd4-space-group);
+    padding-left: var(--hd4-space-section);
     border-left: 1px solid var(--hf-border);
 }
 
@@ -658,7 +756,7 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 2px 6px;
+    padding: var(--hd4-space-tight) var(--hd4-space-group);
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
@@ -669,7 +767,7 @@ body {
     border-color: var(--hf-yellow);
 }
 
-.hd4-mem-slots { display: flex; gap: 2px; }
+.hd4-mem-slots { display: flex; gap: var(--hd4-space-tight); }
 
 .hd4-mem-slot {
     width: 1.45rem;
@@ -712,7 +810,7 @@ body {
     background: var(--hf-bg-surface);
     border: var(--hf-border-width) solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 2px var(--hf-space-1);
+    padding: var(--hd4-space-tight) var(--hd4-space);
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-border);
 }
@@ -731,11 +829,18 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 2px var(--hf-space-1);
+    padding: var(--hd4-space-tight) var(--hd4-space);
     cursor: pointer;
 }
 .hd4-curve-select:hover,
 .hd4-blend-select:hover { background: var(--hf-bg-muted); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Overlay panels (settings, strip editor, MIDI) — from here down, spacing
+   comes from handfish's own --hf-space-* scale, not the dense --hd4-space-*
+   one above. These are full-height drawers over the app, not part of the
+   hardware-panel surface, so they get the design language's normal rhythm.
+   ════════════════════════════════════════════════════════════════════════ */
 
 /* ---- Settings drawer ----
    The gear toggle (.hd4-settings-gear) is now a handfish .hf-icon-btn living in
@@ -872,7 +977,7 @@ body {
     background: var(--hf-bg-surface);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 1px 2px;
+    padding: var(--hd4-space-tight);
     cursor: pointer;
 }
 .hd4-strip-audio:hover { background: var(--hf-bg-muted); color: var(--hf-text-normal); }
@@ -881,26 +986,26 @@ body {
 .hd4-compositor {
     display: flex;
     align-items: flex-start;
-    padding: 4px 8px;
+    padding: var(--hd4-space) var(--hd4-gutter);
     /* visible, not hidden: same focus-scroll hazard as .hd4-transition. */
     overflow: visible;
 }
 
 .hd4-composition-bar {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 4px 8px;
+    gap: var(--hd4-space) var(--hd4-space-group);
     width: 100%;
 }
-/* With no composition active the params area is an invisible flex:1 spacer
-   that shoves the mode buttons into a corner of an otherwise empty band.
-   Collapse it and centre the mode band until a mode needs the width. */
-.hd4-composition-bar:not(:has(.hd4-comp-panel:not([hidden]))) { justify-content: center; }
+/* With no composition active the params area is an invisible flex:1 spacer,
+   so collapse it — otherwise it holds open a band of nothing. The bar stays
+   left-aligned either way: COMPOSITE sits in the same gutter column as
+   TRANSITION in the row below, so the two control rows read as one stack
+   instead of one centred band floating above a left-aligned one. */
 .hd4-composition-bar:not(:has(.hd4-comp-panel:not([hidden]))) .hd4-comp-params { display: none; }
-.hd4-composition-bar > .hd4-section-label { padding-top: var(--hf-space-1); }
 
-.hd4-comp-modes { display: flex; gap: 4px; flex: none; }
+.hd4-comp-modes { display: flex; gap: var(--hd4-space); flex: none; }
 
 .hd4-comp-btn {
     font-family: var(--hf-font-family);
@@ -911,7 +1016,7 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 4px 10px;
+    padding: var(--hd4-btn-pad);
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
@@ -925,25 +1030,25 @@ body {
     background: var(--hf-accent);
     border-color: var(--hf-accent);
 }
-.hd4-comp-key-btn { margin-left: 4px; }
+.hd4-comp-key-btn { margin-left: var(--hd4-space-group); }
 .hd4-comp-key-btn.is-active {
     color: var(--hf-bg-base);
     background: var(--hf-green);
     border-color: var(--hf-green);
 }
 
-.hd4-comp-params { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--hf-space-2); }
+.hd4-comp-params { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--hd4-space); }
 
 .hd4-comp-panel {
     display: grid;
     /* auto-fit (not -fill): empty tracks collapse, so the live param rows
        share the full row width evenly instead of leaving ghost columns. */
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: var(--hf-space-1) var(--hf-space-3);
+    gap: var(--hd4-space) var(--hd4-space-section);
 }
 .hd4-comp-panel[hidden] { display: none; }
 
-.hd4-comp-row { display: flex; align-items: center; gap: var(--hf-space-2); min-width: 0; }
+.hd4-comp-row { display: flex; align-items: center; gap: var(--hd4-space-group); min-width: 0; }
 .hd4-comp-row[hidden] { display: none; }
 
 .hd4-comp-label {
@@ -966,12 +1071,12 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 1px var(--hf-space-1);
+    padding: var(--hd4-space-tight) var(--hd4-space);
     cursor: pointer;
 }
 .hd4-comp-select:hover { background: var(--hf-bg-muted); }
 
-.hd4-comp-range { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--hf-space-2); }
+.hd4-comp-range { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--hd4-space-group); }
 .hd4-comp-slider { flex: 1; min-width: 60px; }
 .hd4-comp-readout {
     flex: none;
@@ -984,9 +1089,13 @@ body {
 }
 
 /* ---- Preview (PVW) monitor + bus ----
-   The PVW column stretches to the stage's full height beside PGM (2:3 of its
-   width); the screen absorbs the column so there is no dead band below the
-   TAKE/AUTO block at any viewport. */
+   The PVW column is 2:3 of PGM's width but shares its height, so a screen
+   that simply stretched to the column (flex: 1) was ~120px taller than the
+   16:9 picture inside it — object-fit: contain drew the preview in the middle
+   and the remainder read as a dead grey band above and below it. The screen
+   now claims exactly its own aspect ratio and the column's leftover height
+   goes to the bus and to TAKE / AUTO, which are the two controls on this
+   panel that most deserve a large target. */
 .hd4-preview-wrap {
     flex: 1 1 0;
     width: auto;
@@ -994,12 +1103,15 @@ body {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--hd4-space);
 }
 
 .hd4-preview-screen {
     position: relative;
-    flex: 1;
+    /* shrink-only: on a short viewport the ratio yields, the row never
+       overflows. */
+    flex: 0 1 auto;
+    aspect-ratio: 16 / 9;
     min-height: 0;
     background: var(--hf-bg-muted);
     border: var(--hf-border-width) solid transparent;
@@ -1010,7 +1122,12 @@ body {
 .hd4-preview-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
 .hd4-preview-tag { color: var(--hf-green); }
 
-.hd4-preview-bus { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--hf-space-1); }
+.hd4-preview-bus {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--hd4-space);
+    flex: none;
+}
 
 .hd4-pvw-btn {
     font-family: var(--hf-font-family-mono);
@@ -1020,7 +1137,7 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 4px 0;
+    padding: var(--hd4-space) 0;
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
@@ -1031,7 +1148,14 @@ body {
     border-color: var(--hf-green);
 }
 
-.hd4-preview-take { display: grid; grid-template-columns: 1fr 1fr; gap: var(--hf-space-1); }
+.hd4-preview-take {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--hd4-space);
+    flex: none;
+    margin-top: auto;
+    min-height: var(--hd4-bus-h);
+}
 .hd4-preview-action {
     font-family: var(--hf-font-family);
     font-size: var(--hf-size-sm);
@@ -1041,14 +1165,14 @@ body {
     background: var(--hf-bg-elevated);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 4px var(--hf-space-1);
+    padding: var(--hd4-space);
     cursor: pointer;
     transition: var(--hf-transition-color), var(--hf-transition-bg), var(--hf-transition-border);
 }
 .hd4-preview-action:hover { background: var(--hf-bg-muted); color: var(--hf-text-bright); }
 
 /* ---- Channel-strip audio editor ---- */
-.hd4-edit-btn { width: auto; padding: 0 var(--hf-space-1); }
+.hd4-edit-btn { width: auto; padding: 0 var(--hd4-space); }
 .hd4-edit-btn.is-active { color: var(--hf-bg-base); background: var(--hf-accent); border-color: var(--hf-accent); }
 
 .hd4-stripedit-overlay {
@@ -1139,17 +1263,18 @@ body {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 3px;
+    justify-content: center;
+    gap: var(--hd4-space);
     flex: none;
     min-width: 11rem;
     max-width: 14rem;
-    padding: 5px 7px;
+    padding: var(--hd4-space) var(--hd4-space-group);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
     background: var(--hf-bg-elevated);
 }
 .hd4-user-bar > .hd4-section-label { text-align: center; }
-.hd4-user-slot { display: flex; flex-direction: row; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.hd4-user-slot { display: flex; flex-direction: row; align-items: center; gap: var(--hd4-space); flex: 0 1 auto; min-height: 1.9rem; min-width: 0; }
 .hd4-user-slot .hd4-user-btn { flex: 1 1 55%; min-width: 0; }
 .hd4-user-slot .hd4-user-assign { flex: 1 1 45%; min-width: 0; }
 .hd4-user-btn {
@@ -1162,7 +1287,7 @@ body {
     background: var(--hf-bg-surface);
     border: 1px solid transparent;
     border-radius: var(--hf-radius-sm);
-    padding: 3px var(--hf-space-1);
+    padding: var(--hd4-space-tight) var(--hd4-space);
     cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
