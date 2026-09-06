@@ -2,10 +2,10 @@
 
 **A four-channel software video mixer for the open web.**
 
-HD4 is a broadcast-style video switcher with an integrated audio mixer, built
-entirely client-side in vanilla JavaScript on the Noise Factor platform — the
-[Noisemaker](https://noisemaker.app) shader engine for video, WebAudio for sound,
-and the handfish design language for the interface.
+HD4 is a broadcast-style video switcher with an integrated audio mixer.
+It runs entirely client-side in vanilla JavaScript on the Noise Factor platform.
+It uses the [Noisemaker](https://noisemaker.app) shader engine for video, WebAudio
+for sound, and the handfish design language for the interface.
 
 Its true north is the classic one-box AV mixer: pick a live channel,
 transition with **CUT / MIX / WIPE**, composite (**PinP / SPLIT / QUAD / KEY**),
@@ -23,8 +23,8 @@ The full feature set is built and tested (215 unit tests + a
 Playwright integration suite).
 
 **Switching & program**
-- **4 channels**, each a camera (pick the **device**), video file, image, or a
-  pattern/fill from the source library; **per-channel fit** (scale vs zoom/crop).
+- **4 channels**: each accepts a camera, video file, image, or pattern/fill from the source library.
+  For cameras, select the **device**. Use **per-channel fit** to select scale or zoom/crop.
 - **Multiview** of all four sources, a **program monitor**, and a **preview (PVW)**
   monitor with **TAKE / AUTO**.
 - **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**,
@@ -40,8 +40,8 @@ Playwright integration suite).
 **Audio**
 - Full per-channel strip: **HPF, 3-band EQ, gate, compressor, pan, delay**, plus **AUX / REV sends**.
 - Main bus: **3-band EQ, limiter, reverb** (time / type), **multiband compressor**, and an **AUX bus**.
-- Per-channel **fader / mute / solo / meter**; each channel's audio source is independently
-  selectable — **follow the video, none, or a specific input device**.
+- Per-channel **fader / mute / solo / meter**. Select each channel's audio source independently:
+  **follow the video, none, or a specific input device**.
 - **Auto-audio**: audio-follows-video, **AUTO MIXING** (level/weight gain sharing), and **VIDEO FOLLOWS AUDIO**.
 
 **Control & state**
@@ -50,7 +50,7 @@ Playwright integration suite).
 - **USER [1–5]** assignable macro buttons and **MIDI** control (learn + map), both persisted.
 - **8 memory slots** (save / recall the full state, persisted to `localStorage`).
 - **Settings** drawer: output resolution, theme, output-fade time, beat sensitivity.
-- handfish design language; broadcast-industrial layout; keyboard shortcuts.
+- handfish design language, broadcast-industrial layout, and keyboard shortcuts.
 
 The full design rationale and the per-area implementation notes are in
 [`docs/superpowers/specs/2026-06-14-hd4-design.md`](docs/superpowers/specs/2026-06-14-hd4-design.md).
