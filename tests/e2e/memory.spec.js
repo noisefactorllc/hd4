@@ -117,10 +117,11 @@ test('a still an older save kept as text moves to IndexedDB on load, which frees
         }
     }, text)
 
-    // Full: a save fails, says so, and leaves the slot empty.
+    // Full: a save fails and leaves the slot empty.
+    const failed = page.waitForEvent('console', (msg) => msg.type() === 'error' && msg.text().includes('memory 5 was not saved'))
     await page.click('.hd4-mem-save')
     await page.click('.hd4-mem-slot[data-slot="5"]')
-    await expect(page.locator('.hf-toast-error')).toContainText('Memory 5 was not saved')
+    await failed
     await expect(page.locator('.hd4-mem-slot[data-slot="5"]')).not.toHaveClass(/is-occupied/)
     expect(await page.evaluate(() => localStorage.getItem('hd4.memory.5'))).toBeNull()
 

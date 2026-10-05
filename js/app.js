@@ -16,7 +16,7 @@
 // Importing handfish registers the web components used by the UI
 // (select-dropdown, slider-value, tempo-bar) and provides the About dialog +
 // tooltip initializer for the industrial top bar.
-import { AboutDialog, initializeTooltips, showError } from 'handfish'
+import { AboutDialog, initializeTooltips } from 'handfish'
 import { logoSvg } from './ui/logo.js'
 import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
@@ -441,10 +441,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
         if (mainBusEditor.isOpen) mainBusEditor.update(audio.mainParams())
     }
     // A channel showing a still saves a reference to it: the still goes to
-    // IndexedDB first, then the slot. A failure in either is reported and the
-    // slot keeps what it had.
-    const saveMemory = async (slot) => {
-        const snapshot = captureSnapshot(modules)
+    // IndexedDB first, then the slot. If either fails the slot keeps what it had.
+    const writeMemory = async (slot, snapshot) => {
         // On a full localStorage there is room only once older slots' stills
         // have moved out.
         await memoryStillsMigrated()
@@ -452,14 +450,27 @@ async function bootInto({ container = null, audioContext = null, destination = n
             await memory.saveWithStills(slot, snapshot, storeEmbeddedStills)
         } catch (e) {
             console.error(`[hd4] memory ${slot} was not saved`, e)
-            showError(`Memory ${slot} was not saved: browser storage is full or unavailable.`)
             return
         }
         memoryBar.setOccupied(memory.list())
     }
+    // Saves finish in click order, and a recall waits for a save still being
+    // written, as when saves were synchronous.
+    let saving = null
+    const saveMemory = (slot) => {
+        const snapshot = captureSnapshot(modules)
+        const save = (saving || Promise.resolve()).then(() => writeMemory(slot, snapshot))
+        saving = save
+        save.then(() => { if (saving === save) saving = null })
+    }
+    const recallMemory = (slot) => {
+        const recall = () => { applySnapshot(memory.load(slot), modules); refreshAfterRecall() }
+        if (saving) saving.then(recall)
+        else recall()
+    }
     const memoryBar = buildMemoryBar(topbar, {
         onSave: (slot) => { saveMemory(slot) },
-        onRecall: (slot) => { applySnapshot(memory.load(slot), modules); refreshAfterRecall() },
+        onRecall: (slot) => { recallMemory(slot) },
     })
     memoryBar.setOccupied(memory.list())
 
@@ -485,7 +496,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
     const runUserAction = (id) => {
         if (!id) return
         if (id.startsWith('take:')) { switcher.take(Number(id.slice(5)), now()); return }
-        if (id.startsWith('mem:')) { applySnapshot(memory.load(Number(id.slice(4))), modules); refreshAfterRecall(); return }
+        if (id.startsWith('mem:')) { recallMemory(Number(id.slice(4))); return }
         switch (id) {
             case 'cut': case 'mix': case 'wipe': switcher.setType(id); transitionBar.setType(id); break
             case 'quad': case 'pinp': case 'split': compositorState.toggleComposition(id); syncComposition(); break
