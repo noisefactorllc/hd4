@@ -7,8 +7,18 @@
  * into a plain serializable object; applySnapshot drives them back from
  * one. Transient output (FREEZE / OUTPUT FADE) is intentionally not saved,
  * matching the hardware.
+ *
+ * A channel showing a captured still is saved as a reference,
+ * { type: 'image', name, stillId }. The still's bytes are stored once, as a
+ * Blob in IndexedDB (stillStorage.js). A slot never carries an image as a
+ * data: or blob: URL: Chrome allows 5,242,880 characters of localStorage per
+ * origin, and one high-resolution still as text came close to filling it.
  */
 export const MEMORY_SLOTS = 8
+
+// data: URLs carry an image as text; blob: URLs end with the page.
+const UNSAVEABLE_URL = /^(?:data|blob):/i
+const isDataUrl = (url) => typeof url === 'string' && /^data:/i.test(url)
 
 // JSON drops non-finite numbers to null; audio params legitimately use them
 // (a send at -Infinity = off, a compressor ratio of Infinity = INF:1). Encode
@@ -36,7 +46,75 @@ export class MemoryStore {
     _key(slot) { return `${this._prefix}${slot}` }
 
     save(slot, snapshot) {
+        const channels = Array.isArray(snapshot?.channels) ? snapshot.channels : []
+        if (channels.some((src) => typeof src?.url === 'string' && UNSAVEABLE_URL.test(src.url))) {
+            throw new Error('A memory slot must not carry an image as a data: or blob: URL')
+        }
         this._storage.setItem(this._key(slot), JSON.stringify(snapshot, jsonReplacer))
+    }
+
+    /**
+     * Save a snapshot whose channels may show a still as a data URL. The stills
+     * are stored first, through `storeStills`, and the slot keeps only their
+     * ids. If storing fails this rejects and the slot is not written, because
+     * a slot must never name a still that is not stored.
+     *
+     * @param {number} slot
+     * @param {object} snapshot from captureSnapshot
+     * @param {(dataUrls: string[]) => Promise<Map<string, string>>} storeStills
+     *        resolves, once every still is committed, with data URL -> still id
+     */
+    async saveWithStills(slot, snapshot, storeStills) {
+        const dataUrls = embeddedStills(snapshot)
+        const ids = dataUrls.length ? await storeStills(dataUrls) : new Map()
+        this.save(slot, referenceStills(snapshot, ids))
+    }
+
+    /**
+     * Move the stills that older saves kept in slots as data URL text out to
+     * still storage, then remove the text from the slots. That frees the
+     * localStorage they filled.
+     *
+     * A slot loses its text only after `storeStills` has committed every still
+     * in it, so a failure leaves the slot exactly as it was. Each slot is read
+     * again before it is rewritten: a save made meanwhile is kept.
+     *
+     * @param {(dataUrls: string[]) => Promise<Map<string, string>>} storeStills
+     * @returns {Promise<number>} how many slots were moved
+     */
+    async moveEmbeddedStills(storeStills) {
+        const committed = new Map() // data URL -> still id, stored during this run
+        let moved = 0
+        for (let i = 1; i <= this._slots; i++) {
+            const key = this._key(i)
+            const raw = this._storage.getItem(key)
+            if (!raw) continue
+            let snapshot
+            try { snapshot = JSON.parse(raw, jsonReviver) } catch { continue }
+            const dataUrls = embeddedStills(snapshot)
+            if (!dataUrls.length) continue
+            try {
+                const pending = dataUrls.filter((url) => !committed.has(url))
+                if (pending.length) {
+                    const ids = await storeStills(pending)
+                    for (const url of pending) {
+                        if (!ids.has(url)) throw new Error('a still was not stored')
+                        committed.set(url, ids.get(url))
+                    }
+                }
+            } catch (err) {
+                console.error(`[hd4] memory ${i} keeps its still as text: it could not be stored`, err)
+                continue
+            }
+            if (this._storage.getItem(key) !== raw) continue // saved again meanwhile
+            try {
+                this.save(i, referenceStills(snapshot, committed))
+                moved++
+            } catch (err) {
+                console.error(`[hd4] memory ${i} keeps its still as text: the slot could not be rewritten`, err)
+            }
+        }
+        return moved
     }
 
     load(slot) {
@@ -53,6 +131,30 @@ export class MemoryStore {
         const out = []
         for (let i = 1; i <= this._slots; i++) if (this.has(i)) out.push(i)
         return out
+    }
+}
+
+/** The stills a snapshot's channels show as data URL text, each once. */
+export function embeddedStills(snapshot) {
+    const channels = Array.isArray(snapshot?.channels) ? snapshot.channels : []
+    const urls = channels.filter((src) => src?.type === 'image' && isDataUrl(src.url)).map((src) => src.url)
+    return [...new Set(urls)]
+}
+
+/**
+ * The snapshot with each still shown as data URL text replaced by a reference
+ * to its stored copy. `ids` maps data URL -> still id; other channels are
+ * unchanged.
+ */
+export function referenceStills(snapshot, ids) {
+    if (!Array.isArray(snapshot?.channels)) return snapshot
+    return {
+        ...snapshot,
+        channels: snapshot.channels.map((src) => (
+            src?.type === 'image' && isDataUrl(src.url) && ids.has(src.url)
+                ? { type: 'image', name: src.name || '', stillId: ids.get(src.url) }
+                : src
+        )),
     }
 }
 

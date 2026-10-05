@@ -16,7 +16,7 @@
 // Importing handfish registers the web components used by the UI
 // (select-dropdown, slider-value, tempo-bar) and provides the About dialog +
 // tooltip initializer for the industrial top bar.
-import { AboutDialog, initializeTooltips } from 'handfish'
+import { AboutDialog, initializeTooltips, showError } from 'handfish'
 import { logoSvg } from './ui/logo.js'
 import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
@@ -34,6 +34,7 @@ import { CompositorState } from './compositorState.js'
 import { AudioMixer } from './audio/mixer.js'
 import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
 import { StillStore } from './still.js'
+import { getStill, memoryStillsMigrated, migrateMemoryStills, storeEmbeddedStills } from './stillStorage.js'
 import { Recorder, recordingFilename } from './recorder.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
@@ -126,7 +127,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         const channel = new Channel({
             id: i + 1,
             canvas,
-            driverFactory: makeChannelDriverFactory(renderer, audioBinding),
+            driverFactory: makeChannelDriverFactory(renderer, audioBinding, { loadStill: getStill }),
         })
         state.channels.push(channel)
         state.renderers.push(renderer)
@@ -419,6 +420,10 @@ async function bootInto({ container = null, audioContext = null, destination = n
 
     // --- Memory (8-slot save/recall) ---
     const memory = new MemoryStore(window.localStorage)
+    // Slots saved before stills had their own storage hold the still as data
+    // URL text. Move the bytes to IndexedDB, which frees localStorage.
+    // Non-blocking; saves wait for it.
+    migrateMemoryStills(memory).catch((e) => console.error('[hd4] could not move memory stills', e))
     const modules = { channels: state.channels, switcher, output, compositor: compositorState, audio }
     const refreshAfterRecall = () => {
         multiview.refresh()
@@ -435,8 +440,25 @@ async function bootInto({ container = null, audioContext = null, destination = n
         if (stripEditor.isOpen) stripEditor.update(audio.stripParams(stripEditor.channel))
         if (mainBusEditor.isOpen) mainBusEditor.update(audio.mainParams())
     }
+    // A channel showing a still saves a reference to it: the still goes to
+    // IndexedDB first, then the slot. A failure in either is reported and the
+    // slot keeps what it had.
+    const saveMemory = async (slot) => {
+        const snapshot = captureSnapshot(modules)
+        // On a full localStorage there is room only once older slots' stills
+        // have moved out.
+        await memoryStillsMigrated()
+        try {
+            await memory.saveWithStills(slot, snapshot, storeEmbeddedStills)
+        } catch (e) {
+            console.error(`[hd4] memory ${slot} was not saved`, e)
+            showError(`Memory ${slot} was not saved: browser storage is full or unavailable.`)
+            return
+        }
+        memoryBar.setOccupied(memory.list())
+    }
     const memoryBar = buildMemoryBar(topbar, {
-        onSave: (slot) => { memory.save(slot, captureSnapshot(modules)); memoryBar.setOccupied(memory.list()) },
+        onSave: (slot) => { saveMemory(slot) },
         onRecall: (slot) => { applySnapshot(memory.load(slot), modules); refreshAfterRecall() },
     })
     memoryBar.setOccupied(memory.list())

@@ -7,6 +7,7 @@
  *
  * The non-serializable handle (a File) arrives via ctx.runtime; the
  * descriptor only carries a persistable name (or, for cameras, deviceId).
+ * A stored still is named by its stillId; ctx.loadStill resolves its Blob.
  * Mirrors visualize's DeckMedia + the media DSL.
  */
 
@@ -44,7 +45,14 @@ export function makeMediaDriver(source, renderer, ctx = {}) {
         } else if (kind === 'video') {
             startVideoFile(ctx.runtime?.file)
         } else if (kind === 'image') {
-            startImageFile(ctx.runtime?.file)
+            let file = ctx.runtime?.file
+            // A recalled memory slot names its still by id; the bytes are a
+            // Blob in still storage.
+            if (!file && source.stillId && ctx.loadStill) {
+                file = await ctx.loadStill(source.stillId)
+                if (stopped) return
+            }
+            startImageFile(file)
         }
     }
 

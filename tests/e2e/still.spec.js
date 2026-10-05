@@ -3,7 +3,8 @@
  * Still capture integration (INPUT CAPTURE). Grabbing the program
  * while Blue is live stores a Blue still, which then drives the KEY "STILL"
  * source and is selectable as a channel image — verified against real
- * program / channel pixels.
+ * program / channel pixels. A memory slot saves the still as a reference to
+ * its PNG in IndexedDB and recalls it after a reload.
  */
 import { test, expect } from './fixtures.js'
 
@@ -73,4 +74,45 @@ test('the captured still is selectable as a channel image', async ({ page }) => 
         const [ch1, blue] = await page.evaluate(() => [window.__hd4.sampleChannelAvg(0), window.__hd4.sampleChannelAvg(2)])
         return dist(ch1, blue) // ch1 now shows the Blue still
     }, { timeout: 15_000 }).toBeLessThan(40)
+})
+
+test('a memory slot keeps a reference to the still, which recalls from IndexedDB after a reload', async ({ page }) => {
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    // Channel 1 shows the Blue still; save that state into memory 1.
+    await page.selectOption('.hd4-monitor[data-channel="1"] .hd4-source-select', 'still')
+    await expect.poll(async () => {
+        const [ch1, blue] = await page.evaluate(() => [window.__hd4.sampleChannelAvg(0), window.__hd4.sampleChannelAvg(2)])
+        return dist(ch1, blue)
+    }, { timeout: 15_000 }).toBeLessThan(40)
+    const shown = await page.evaluate(() => window.__hd4.sampleChannelAvg(0))
+    await page.click('.hd4-mem-save')
+    await page.click('.hd4-mem-slot[data-slot="1"]')
+    await expect(page.locator('.hd4-mem-slot[data-slot="1"]')).toHaveClass(/is-occupied/)
+
+    // localStorage holds only small references: no image as text, no page-bound URL.
+    const saved = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])))
+    for (const [key, value] of Object.entries(saved)) expect(value, key).not.toMatch(/data:|blob:/)
+    const slot = JSON.parse(saved['hd4.memory.1'])
+    const stillId = slot.channels[0].stillId
+    expect(slot.channels[0]).toEqual({ type: 'image', name: 'Still', stillId: expect.stringMatching(/^[a-f0-9]{64}$/) })
+    expect(saved['hd4.memory.1'].length).toBeLessThan(20_000)
+
+    // The still is a PNG Blob in IndexedDB, keyed by the SHA-256 of its bytes.
+    const stored = await page.evaluate(async (id) => {
+        const { getStill, stillIdOf } = await import('/js/stillStorage.js')
+        const blob = await getStill(id)
+        return blob && { type: blob.type, size: blob.size, id: await stillIdOf(blob) }
+    }, stillId)
+    expect(stored).toEqual({ type: 'image/png', size: expect.any(Number), id: stillId })
+    expect(stored.size).toBeGreaterThan(0)
+
+    // After a reload no still is held in memory: recall loads it from IndexedDB.
+    await page.reload()
+    await page.waitForFunction(() => window.__hd4?.ready === true, null, { timeout: 30_000 })
+    expect(await page.evaluate(() => window.__hd4.still.hasStill)).toBe(false)
+    await page.click('.hd4-mem-slot[data-slot="1"]')
+    expect(await page.evaluate(() => window.__hd4.channels[0].source)).toEqual({ type: 'image', name: 'Still', url: '', stillId })
+    await expect.poll(async () => dist(await page.evaluate(() => window.__hd4.sampleChannelAvg(0)), shown), { timeout: 15_000 }).toBeLessThan(40)
+    expect(errors).toEqual([])
 })

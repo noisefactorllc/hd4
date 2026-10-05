@@ -15,7 +15,10 @@ import {
     sourceLabel,
     serializeSource,
     deserializeSource,
+    isStillId,
 } from '../../js/sources/sourceModel.js'
+
+const STILL_ID = 'ab'.repeat(32)
 
 test('EMPTY_SOURCE is an empty source', () => {
     assert.equal(EMPTY_SOURCE.type, 'none')
@@ -102,4 +105,22 @@ test('deserializeSource is lenient: bad data becomes an empty source', () => {
 
 test('deserializeSource drops a shader with no DSL (corrupt) to empty', () => {
     assert.deepEqual(deserializeSource({ type: 'shader' }), EMPTY_SOURCE)
+})
+
+test('a stored still persists as its id alone, never a URL', () => {
+    const s = createSource('image', { name: 'Still', stillId: STILL_ID })
+    assert.equal(s.stillId, STILL_ID)
+    assert.equal(sourceKind(s), 'media')
+    assert.equal(sourceLabel(s), 'Still')
+    assert.deepEqual(serializeSource(s), { type: 'image', name: 'Still', stillId: STILL_ID })
+    assert.deepEqual(deserializeSource(serializeSource(s)), s)
+})
+
+test('a still id must be a SHA-256 hex digest; anything else is dropped', () => {
+    assert.equal(isStillId(STILL_ID), true)
+    for (const bad of ['', 'still', 'AB'.repeat(32), 'ab'.repeat(31), 42, null, undefined]) {
+        assert.equal(isStillId(bad), false, String(bad))
+        assert.equal('stillId' in createSource('image', { name: 'Still', stillId: bad }), false)
+    }
+    assert.deepEqual(deserializeSource({ type: 'image', name: 'Still', stillId: 'not-an-id' }), { type: 'image', name: 'Still', url: '' })
 })

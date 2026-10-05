@@ -300,6 +300,57 @@ test('a mic that fails to reach the mixer is still released', async () => {
     assert.equal(micStream.tracks[0].stopped, true, 'the acquired mic must be released')
 })
 
+/** Stub the Image constructor the image path uses; returns the images built. */
+function installImageStub() {
+    const images = []
+    globalThis.Image = class { constructor() { this.src = ''; images.push(this) } }
+    return images
+}
+
+const STILL_ID = 'a'.repeat(64)
+
+test('an image naming a still by id shows the Blob loadStill returns, and revokes its URL on stop', async () => {
+    const dom = installBrowserStubs()
+    const images = installImageStub()
+    const blob = new Blob(['still'], { type: 'image/png' })
+    const requested = []
+    const renderer = { compile: async () => {}, uploadMediaFrame() {} }
+
+    const driver = makeMediaDriver({ type: 'image', name: 'Still', url: '', stillId: STILL_ID }, renderer, {
+        loadStill: async (id) => { requested.push(id); return blob },
+    })
+    await driver.start()
+
+    assert.deepEqual(requested, [STILL_ID])
+    assert.equal(dom.created.length, 1, 'the object URL was created')
+    assert.equal(images.length, 1)
+    assert.equal(images[0].src, dom.created[0])
+
+    driver.stop()
+    assert.deepEqual(dom.revoked, dom.created, 'every object URL created must be revoked')
+})
+
+test('an image stopped while its still is loading builds no image and no object URL', async () => {
+    const dom = installBrowserStubs()
+    const images = installImageStub()
+    const still = deferred()
+    const requested = deferred()
+    const renderer = { compile: async () => {}, uploadMediaFrame() {} }
+
+    const driver = makeMediaDriver({ type: 'image', name: 'Still', url: '', stillId: STILL_ID }, renderer, {
+        loadStill: (id) => { requested.resolve(id); return still.promise },
+    })
+    const started = driver.start()
+    await requested.promise // the read from still storage is in flight
+
+    driver.stop() // the user recalls another memory meanwhile
+    still.resolve(new Blob(['still'], { type: 'image/png' }))
+    await started
+
+    assert.deepEqual(images, [], 'no image may be built for a stopped driver')
+    assert.deepEqual(dom.created, [], 'no object URL should have been created at all')
+})
+
 test('a camera stopped while the element is still playing never asks for the mic', async () => {
     // Without the guard after play(), a driver the user already navigated away
     // from goes on to raise a microphone permission prompt and light the mic
