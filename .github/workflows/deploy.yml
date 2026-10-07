@@ -21,6 +21,8 @@ on:
       - 'img/**'
       - '.github/workflows/deploy.yml'
 
+permissions: {}
+
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
