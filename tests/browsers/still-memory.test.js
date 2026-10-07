@@ -11,8 +11,8 @@
  * have the SHA-256 of the captured PNG.
  *
  * No real camera or microphone is ever requested: before the page loads,
- * fake-camera.js replaces getUserMedia and enumerateDevices with a camera that
- * is a canvas, in every browser. FAKE_CAMERA_SCRIPT names another such script.
+ * fake-camera.js replaces navigator.mediaDevices with a plain object whose camera
+ * is a canvas, in every browser, so page code never reaches the native one. FAKE_CAMERA_SCRIPT names another such script.
  *
  * The whole app never runs in WebKit: hd4 listens for camera changes as it
  * starts, and in WebKit that alone asks macOS for the camera, which a page
