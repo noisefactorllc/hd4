@@ -6,5 +6,9 @@ dist/
 *.log
 .DS_Store
 
+# Agent planning scratch — never committed
+docs/superpowers/
+docs/plans/
+
 # Third-party reference manuals — kept locally, not distributed
 *.pdf
