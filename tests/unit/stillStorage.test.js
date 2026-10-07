@@ -151,9 +151,18 @@ test('storing commits each still once, with strict durability', async () => {
     assert.deepEqual([...ids], [[text, sha256(bytes)]])
     const record = stored().get(sha256(bytes))
     assert.equal(record.id, sha256(bytes))
-    assert.ok(record.blob instanceof Blob)
-    assert.deepEqual(await bytesOf(record.blob), bytes)
+    // Bytes, not a Blob: Safari's private browsing refuses a Blob in IndexedDB.
+    assert.ok(record.bytes instanceof ArrayBuffer)
+    assert.equal(record.blob, undefined)
+    assert.equal(record.type, 'image/png')
+    assert.deepEqual(Buffer.from(record.bytes), bytes)
     assert.deepEqual(idb.transactions.slice(writes), [{ storeName: 'stills', mode: 'readwrite', options: { durability: 'strict' } }])
+    assert.deepEqual(await bytesOf(await getStill(sha256(bytes))), bytes)
+})
+
+test('a still stored before as a Blob still reads back', async () => {
+    const bytes = stillBytes(9)
+    stored().set(sha256(bytes), { id: sha256(bytes), blob: new Blob([bytes], { type: 'image/png' }), storedAt: 1 })
     assert.deepEqual(await bytesOf(await getStill(sha256(bytes))), bytes)
 })
 
@@ -203,7 +212,7 @@ test('older slots move their stills to IndexedDB on load and recall them after a
         assert.equal(/data:|blob:/.test(slotText), false)
         assert.deepEqual(JSON.parse(slotText).channels[0], { type: 'image', name: 'Still', stillId: sha256(bytes) })
     }
-    assert.deepEqual(await bytesOf(stored().get(sha256(bytes)).blob), bytes)
+    assert.deepEqual(Buffer.from(stored().get(sha256(bytes)).bytes), bytes)
 
     // A reload: a fresh store over the same localStorage, recalled into a channel.
     const { channel, shown, images } = await recallInto(storage, 1, t)

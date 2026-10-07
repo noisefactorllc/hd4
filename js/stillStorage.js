@@ -3,8 +3,11 @@
  * Still storage — the captured stills that memory slots use.
  *
  * A memory slot names a still by id: { type: 'image', name: 'Still', stillId }.
- * The still is stored here, in IndexedDB, as its PNG bytes in a Blob, keyed by
- * the SHA-256 of those bytes. There is one record however many slots use it.
+ * The still is stored here, in IndexedDB, as its image bytes in an ArrayBuffer
+ * beside its MIME type, keyed by the SHA-256 of those bytes. There is one record
+ * however many slots use it. Safari's private browsing refuses to store a Blob in
+ * IndexedDB but takes an ArrayBuffer; records written before hold a Blob and are
+ * still read.
  *
  * Slots used to carry the still itself as a data URL in localStorage. Chrome
  * allows 5,242,880 characters per origin there, and one high-resolution still
@@ -111,16 +114,18 @@ export async function storeEmbeddedStills(dataUrls = []) {
     const ids = new Map()
     if (!dataUrls.length) return ids
     if (typeof indexedDB === 'undefined') throw new Error('Still storage is unavailable')
+    // Every still's bytes are read before the transaction opens: awaiting inside
+    // one lets it commit early.
     const records = []
     for (const dataUrl of new Set(dataUrls)) {
         const blob = decodeEmbeddedStill(dataUrl)
         const id = await stillIdOf(blob)
         ids.set(dataUrl, id)
-        records.push({ id, blob })
+        records.push({ id, type: blob.type, bytes: await blob.arrayBuffer() })
     }
     const storedAt = Date.now()
     await transact('readwrite', (store) => {
-        for (const { id, blob } of records) store.put({ id, blob, storedAt })
+        for (const { id, type, bytes } of records) store.put({ id, type, bytes, storedAt })
     })
     return ids
 }
@@ -135,6 +140,7 @@ export async function getStill(id) {
     if (typeof indexedDB === 'undefined' || !isStillId(id)) return null
     try {
         const record = await transact('readonly', (store) => store.get(id))
+        if (record?.bytes instanceof ArrayBuffer) return new Blob([record.bytes], { type: record.type })
         if (record?.blob instanceof Blob) return record.blob
         console.warn(`[hd4] still ${id} is not stored on this device`)
     } catch (err) {
