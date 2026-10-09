@@ -29,6 +29,9 @@ export function buildMultiview(container, channels, {
                 t.setLabel(channels[i].label)
                 t.syncSelect(channels[i].source)
                 t.setFitVisible(sourceKind(channels[i].source) === 'media')
+                // The renderer holds the fit mode; keep the toggle in step with
+                // it (a memory recall restores it directly on the renderer).
+                t.updateFit(getFit ? getFit(i) : 'cover')
             })
         },
         setCameras(list) {
@@ -75,6 +78,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
         setLabel(text) { label.textContent = text; label.title = text },
         syncSelect(source) { setSelectValue(picker.select, source) },
         setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
+        updateFit(mode) { fit.update(mode) },
         updateCameras(list) { picker.updateCameras(list) },
         setStillAvailable(on) { picker.setStillAvailable(on) },
     }
@@ -230,5 +234,9 @@ function buildFitToggle(index, onSetFit, initialMode = 'cover') {
         render()
         onSetFit?.(index, mode)
     })
-    return { el }
+    return {
+        el,
+        /** Sync the toggle with the renderer's fit mode. */
+        update(next) { mode = next === 'contain' ? 'contain' : 'cover'; render() },
+    }
 }

@@ -14,6 +14,7 @@ import {
     embeddedStills,
     referenceStills,
 } from '../../js/memory.js'
+import { PreviewBus } from '../../js/previewBus.js'
 
 function fakeStorage() {
     const m = new Map()
@@ -30,6 +31,8 @@ const sampleModulesForCapture = () => ({
         { serialize: () => ({ type: 'shader', dsl: 'noise().write(o0)', name: 'Noise' }) },
         { serialize: () => ({ type: 'camera', deviceId: 'cam-1' }) },
     ],
+    renderers: [{ fitMode: 'cover' }, { fitMode: 'contain' }],
+    preview: { preview: 3 },
     switcher: { live: 2, type: 'wipe', time: 1.5 },
     output: { vfx: 'mono' },
     compositor: { snapshot: () => ({ composition: 'quad', key: { on: true } }) },
@@ -87,13 +90,15 @@ test('there are 8 memory slots', () => {
     assert.equal(MEMORY_SLOTS, 8)
 })
 
-test('captureSnapshot records channels, switcher, output, and audio', () => {
+test('captureSnapshot records channels, fits, preview, switcher, output, and audio', () => {
     const snap = captureSnapshot(sampleModulesForCapture())
     assert.equal(snap.version, 1)
     assert.deepEqual(snap.channels, [
         { type: 'shader', dsl: 'noise().write(o0)', name: 'Noise' },
         { type: 'camera', deviceId: 'cam-1' },
     ])
+    assert.deepEqual(snap.fits, ['cover', 'contain'])
+    assert.equal(snap.preview, 3)
     assert.deepEqual(snap.switcher, { live: 2, type: 'wipe', time: 1.5 })
     assert.deepEqual(snap.output, { vfx: 'mono' })
     assert.deepEqual(snap.composition, { composition: 'quad', key: { on: true } })
@@ -114,6 +119,13 @@ test('applySnapshot drives the live modules with the saved values', () => {
             { restore: (s) => calls.push(['restore', 0, s.type]) },
             { restore: (s) => calls.push(['restore', 1, s.type]) },
         ],
+        renderers: [
+            { setFitMode: (m) => calls.push(['setFitMode', 0, m]) },
+            { setFitMode: (m) => calls.push(['setFitMode', 1, m]) },
+        ],
+        preview: {
+            set: (n) => calls.push(['preview', n]),
+        },
         switcher: {
             setType: (t) => calls.push(['setType', t]),
             setTime: (s) => calls.push(['setTime', s]),
@@ -138,6 +150,9 @@ test('applySnapshot drives the live modules with the saved values', () => {
     applySnapshot(snap, modules)
 
     assert.ok(calls.some((c) => c[0] === 'restore' && c[1] === 1 && c[2] === 'camera'))
+    assert.ok(calls.some((c) => c[0] === 'setFitMode' && c[1] === 0 && c[2] === 'cover'))
+    assert.ok(calls.some((c) => c[0] === 'setFitMode' && c[1] === 1 && c[2] === 'contain'))
+    assert.ok(calls.some((c) => c[0] === 'preview' && c[1] === 3))
     assert.ok(calls.some((c) => c[0] === 'setType' && c[1] === 'wipe'))
     assert.ok(calls.some((c) => c[0] === 'setTime' && c[1] === 1.5))
     assert.ok(calls.some((c) => c[0] === 'cut' && c[1] === 2))
@@ -179,6 +194,37 @@ test('applySnapshot applies a legacy v1 snapshot (no composition/strip/mainBus)'
     assert.ok(!calls.includes('comp')) // no composition in a legacy snapshot
     assert.ok(!calls.includes('strip'))
     assert.ok(!calls.includes('main'))
+})
+
+test('captureSnapshot without renderers/preview defaults each fit to cover and omits preview', () => {
+    const { renderers, preview, ...modules } = sampleModulesForCapture()
+    const snap = captureSnapshot(modules)
+    assert.deepEqual(snap.fits, ['cover', 'cover'])
+    assert.equal(snap.preview, undefined)
+})
+
+test('applySnapshot tolerates modules without renderers/preview', () => {
+    const calls = []
+    const modules = {
+        channels: [{ restore: () => calls.push('restore') }],
+        switcher: { setType: () => {}, setTime: () => {}, cut: () => {} },
+        output: { setVfx: () => {} },
+        audio: { setFader: () => {}, setMute: () => {}, setSolo: () => {}, setMainFader: () => {} },
+    }
+    assert.doesNotThrow(() => applySnapshot(captureSnapshot(sampleModulesForCapture()), modules))
+    assert.ok(calls.includes('restore'))
+})
+
+test('applySnapshot ignores fit modes it does not know and an out-of-range preview', () => {
+    const calls = []
+    const setFitMode = (m) => calls.push(['setFitMode', m])
+    const modules = {
+        renderers: [{ setFitMode }, { setFitMode }],
+        preview: new PreviewBus({ channelCount: 4, preview: 2 }),
+    }
+    applySnapshot({ fits: ['stretch', 'cover'], preview: 9 }, modules)
+    assert.deepEqual(calls, [['setFitMode', 'cover']])
+    assert.equal(modules.preview.preview, 2, 'PreviewBus.set rejects an out-of-range channel')
 })
 
 // --- Stills: a slot keeps a reference; the bytes live in still storage ---

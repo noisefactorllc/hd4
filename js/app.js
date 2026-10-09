@@ -424,12 +424,13 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // URL text. Move the bytes to IndexedDB, which frees localStorage.
     // Non-blocking; saves wait for it.
     migrateMemoryStills(memory).catch((e) => console.error('[hd4] could not move memory stills', e))
-    const modules = { channels: state.channels, switcher, output, compositor: compositorState, audio }
+    const modules = { channels: state.channels, switcher, output, compositor: compositorState, audio, renderers: state.renderers, preview: previewBus }
     const refreshAfterRecall = () => {
-        multiview.refresh()
+        multiview.refresh() // re-reads each tile's fit toggle from its renderer
         transitionBar.setType(switcher.type)
         transitionBar.setTime(switcher.time)
         outputBar.setVfx(output.vfx)
+        previewView.setPreview(previewBus.preview)
         syncComposition()
         for (let i = 0; i < CHANNEL_COUNT; i++) {
             mixerPanel.setFader(i, audio.faderOf(i))

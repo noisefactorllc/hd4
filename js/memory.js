@@ -158,10 +158,15 @@ export function referenceStills(snapshot, ids) {
     }
 }
 
-export function captureSnapshot({ channels, switcher, output, compositor, audio }) {
+export function captureSnapshot({ channels, switcher, output, compositor, audio, renderers, preview }) {
     return {
         version: 1,
         channels: channels.map((c) => c.serialize()),
+        // Per-channel fit mode (cover/contain) — a renderer setting the user
+        // reaches from each multiview tile, not part of a channel's source.
+        fits: channels.map((_, i) => renderers?.[i]?.fitMode || 'cover'),
+        // The PVW preview-bus selection.
+        preview: preview?.preview,
         switcher: { live: switcher.live, type: switcher.type, time: switcher.time },
         output: { vfx: output.vfx },
         composition: compositor ? compositor.snapshot() : undefined,
@@ -178,11 +183,17 @@ export function captureSnapshot({ channels, switcher, output, compositor, audio 
     }
 }
 
-export function applySnapshot(snap, { channels, switcher, output, compositor, audio }) {
+export function applySnapshot(snap, { channels, switcher, output, compositor, audio, renderers, preview }) {
     if (!snap) return
     if (Array.isArray(snap.channels)) {
         snap.channels.forEach((src, i) => channels[i]?.restore(src))
     }
+    if (Array.isArray(snap.fits)) {
+        snap.fits.forEach((mode, i) => {
+            if (mode === 'cover' || mode === 'contain') renderers?.[i]?.setFitMode(mode)
+        })
+    }
+    if (preview && Number.isInteger(snap.preview)) preview.set(snap.preview)
     if (snap.switcher && switcher) {
         switcher.setType(snap.switcher.type)
         switcher.setTime(snap.switcher.time)

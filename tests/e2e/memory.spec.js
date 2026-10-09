@@ -53,23 +53,37 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('saves a state, then recalls it after changes', async ({ page }) => {
-    // State A: cut to channel 4, mute channel 2, VFX negative.
+    // State A: cut to channel 4, mute channel 2, VFX negative, ch2 fit Crop,
+    // PVW queued on 4.
     await page.click('.hd4-trans-btn[data-type="cut"]')
     await page.click('.hd4-take-btn[data-channel="4"]')
     await page.click('.hd4-strip[data-channel="2"] .hd4-mute-btn')
     await page.selectOption('.hd4-vfx-select', 'negative')
+    await page.click('.hd4-monitor[data-channel="2"] .hd4-fit-btn') // contain → cover
+    await page.click('.hd4-pvw-btn[data-channel="4"]')
+    expect(await page.evaluate(() => window.__hd4.renderers[1].fitMode)).toBe('cover')
+    expect(await page.evaluate(() => window.__hd4.preview.preview)).toBe(4)
 
     // Save into slot 1.
     await page.click('.hd4-mem-save')
     await page.click('.hd4-mem-slot[data-slot="1"]')
     await expect(page.locator('.hd4-mem-slot[data-slot="1"]')).toHaveClass(/is-occupied/)
 
-    // State B: different channel, unmute, no VFX.
+    // The stored slot carries the fit modes and the preview selection.
+    const slot = JSON.parse(await page.evaluate(() => localStorage.getItem('hd4.memory.1')))
+    expect(slot.fits).toEqual(['cover', 'cover', 'cover', 'cover'])
+    expect(slot.preview).toBe(4)
+
+    // State B: different channel, unmute, no VFX, fit back to Scale, PVW on 2.
     await page.click('.hd4-take-btn[data-channel="3"]')
     await page.click('.hd4-strip[data-channel="2"] .hd4-mute-btn')
     await page.selectOption('.hd4-vfx-select', 'none')
+    await page.click('.hd4-monitor[data-channel="2"] .hd4-fit-btn') // cover → contain
+    await page.click('.hd4-pvw-btn[data-channel="2"]')
     expect(await page.evaluate(() => window.__hd4.switcher.live)).toBe(3)
     expect(await page.evaluate(() => window.__hd4.audio.isMuted(1))).toBe(false)
+    expect(await page.evaluate(() => window.__hd4.renderers[1].fitMode)).toBe('contain')
+    expect(await page.evaluate(() => window.__hd4.preview.preview)).toBe(2)
 
     // Recall slot 1 → State A is restored, model and UI.
     await page.click('.hd4-mem-slot[data-slot="1"]')
@@ -78,6 +92,10 @@ test('saves a state, then recalls it after changes', async ({ page }) => {
     expect(await page.evaluate(() => window.__hd4.audio.isMuted(1))).toBe(true)
     await expect(page.locator('.hd4-strip[data-channel="2"] .hd4-mute-btn')).toHaveClass(/is-active/)
     expect(await page.evaluate(() => document.querySelector('.hd4-vfx-select').value)).toBe('negative')
+    expect(await page.evaluate(() => window.__hd4.renderers[1].fitMode)).toBe('cover')
+    expect(await page.evaluate(() => window.__hd4.preview.preview)).toBe(4)
+    await expect(page.locator('.hd4-monitor[data-channel="2"] .hd4-fit-btn')).toHaveText('Crop')
+    await expect(page.locator('.hd4-pvw-btn[data-channel="4"]')).toHaveClass(/is-preview/)
 })
 
 test('memory persists across a reload', async ({ page }) => {
