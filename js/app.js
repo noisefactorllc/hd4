@@ -490,6 +490,13 @@ async function bootInto({ container = null, audioContext = null, destination = n
             autoBar.setEnabled(on)
         },
         settings: () => settingsDrawer.toggle(),
+    }, document, {
+        // Global single-key shortcuts are suspended while any overlay panel
+        // (settings drawer, channel-strip / main-bus editor, MIDI panel) is
+        // open, so keys pressed inside it only reach that panel's controls.
+        isSuspended: () =>
+            settingsDrawer.isOpen || stripEditor.isOpen ||
+            mainBusEditor.isOpen || midiPanel.isOpen,
     })
 
     // --- USER assignable macro buttons ---

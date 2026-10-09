@@ -6,7 +6,8 @@
  *   q  QUAD   p  PinP   k  KEY   f  FREEZE   b  FADE   r  REC   a  AUTO   s  Settings
  *
  * keyToAction is a pure lookup; attachKeyboard wires it to the document
- * and ignores keystrokes while a field is focused.
+ * and stays out of the way of text fields, keys a focused control already
+ * consumed, and suspended states (an open overlay panel).
  */
 const TRANSITION_KEYS = { c: 'cut', d: 'mix', w: 'wipe' }
 const TOGGLE_KEYS = { q: 'quad', p: 'pinp', k: 'key', f: 'freeze', b: 'fade', r: 'record', a: 'auto', s: 'settings' }
@@ -20,13 +21,26 @@ export function keyToAction(key) {
     return null
 }
 
-/** Wire keyboard shortcuts to the document. Returns a teardown function. */
-export function attachKeyboard(handlers, target = document) {
+/**
+ * Wire keyboard shortcuts to the document. Returns a teardown function.
+ *
+ * Options:
+ *   isSuspended  — predicate consulted before every dispatch; while it
+ *                  returns true (e.g. an overlay panel is open) the global
+ *                  single-key shortcuts are suspended.
+ *
+ * The handler also stays out of the way of focused composed controls: a
+ * keydown the focused control already consumed (defaultPrevented, e.g. the
+ * select-dropdown trigger's type-ahead) never dispatches a global action.
+ */
+export function attachKeyboard(handlers, target = document, { isSuspended } = {}) {
     const onKeyDown = (e) => {
         if (e.metaKey || e.ctrlKey || e.altKey) return
+        if (e.defaultPrevented) return
         const el = e.target
         const tag = el?.tagName
         if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el?.isContentEditable) return
+        if (isSuspended?.()) return
         const action = keyToAction(e.key)
         if (!action) return
         e.preventDefault()
