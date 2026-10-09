@@ -36,6 +36,10 @@ export function keyToAction(key) {
 export function attachKeyboard(handlers, target = document, { isSuspended } = {}) {
     const onKeyDown = (e) => {
         if (e.metaKey || e.ctrlKey || e.altKey) return
+        // OS key repeat must not retrigger the shortcuts: holding a toggle
+        // (FREEZE / FADE / REC / AUTO / …) would otherwise flip it on and off
+        // at the repeat rate instead of latching like a hardware button.
+        if (e.repeat) return
         if (e.defaultPrevented) return
         const el = e.target
         const tag = el?.tagName

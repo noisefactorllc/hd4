@@ -130,6 +130,20 @@ test('modifier chords do not dispatch', () => {
     assert.deepEqual(seen, [])
 })
 
+test('an auto-repeated keydown (held key) does not dispatch again', () => {
+    const target = fakeTarget()
+    const seen = []
+    attachKeyboard({ freeze: () => seen.push('freeze') }, target)
+    target.keydown(keyEvent('f'))
+    // Holding the key: the OS re-fires keydown with repeat=true.
+    target.keydown(keyEvent('f', { mods: { repeat: true } }))
+    target.keydown(keyEvent('f', { mods: { repeat: true } }))
+    assert.deepEqual(seen, ['freeze'])
+    // A fresh press (repeat=false) still dispatches.
+    target.keydown(keyEvent('f'))
+    assert.deepEqual(seen, ['freeze', 'freeze'])
+})
+
 test('while suspended (an overlay is open) no shortcut dispatches', () => {
     const target = fakeTarget()
     const seen = []
