@@ -33,6 +33,10 @@ test('a focused select-dropdown trigger consumes s/r/f without firing global sho
     expect(await page.evaluate(() => window.__hd4.settingsDrawer.isOpen)).toBe(false)
 
     // r (Random) still type-ahead's the mode — and must not start REC.
+    // The handfish select-dropdown resets its type-ahead buffer only after
+    // 500 ms of quiet; wait past that window so "r" starts a fresh search
+    // instead of extending "s" into a matchless "sr".
+    await page.waitForTimeout(600)
     await page.keyboard.press('r')
     await expect.poll(() => page.evaluate(() => window.__hd4.autoMix.mode), { timeout: 5_000 }).toBe('random')
     expect(await page.evaluate(() => window.__hd4.recorder.recording)).toBe(false)

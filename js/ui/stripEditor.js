@@ -7,6 +7,7 @@
  * channel's current settings.
  */
 import { COMP_RATIOS } from '../audio/strip.js'
+import { registerEscapeable, unregisterEscapeable } from 'handfish'
 
 const ratioLabel = (r) => (Number.isFinite(r) ? `${r.toFixed(2)}:1` : 'INF:1')
 
@@ -95,8 +96,13 @@ export function buildStripEditor(container, { channelCount = 4, onParam } = {}) 
         tabBtns.forEach((t, idx) => t.classList.toggle('is-active', idx === i))
         if (params) update(params)
         overlay.dataset.open = 'true'
+        // Register on the handfish escape stack (topmost close on Escape).
+        registerEscapeable(overlay, hide)
     }
-    function hide() { overlay.dataset.open = 'false' }
+    function hide() {
+        overlay.dataset.open = 'false'
+        unregisterEscapeable(overlay)
+    }
     function update(params) {
         for (const [key, c] of Object.entries(controls)) if (key in params) c.set(params[key])
     }

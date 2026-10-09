@@ -6,6 +6,7 @@
  * the Settings store; reports changes via callbacks.
  */
 import { THEMES } from '../theme.js'
+import { registerEscapeable, unregisterEscapeable } from 'handfish'
 
 const RESOLUTIONS = ['640x360', '1280x720', '1920x1080']
 const SHORTCUTS = [
@@ -86,9 +87,12 @@ export function buildSettingsDrawer(container, settings, { onResolution, onFadeT
     gearIcon.textContent = 'settings'
     toggleButton.appendChild(gearIcon)
 
-    const open = () => { overlay.dataset.open = 'true' }
-    const close = () => { overlay.dataset.open = 'false' }
-    const toggle = () => { overlay.dataset.open = overlay.dataset.open === 'true' ? 'false' : 'true' }
+    // Escape closes the drawer via the handfish escape stack: while open the
+    // drawer is the topmost registered escapeable, and initEscapeHandler
+    // (wired once at app boot) dismisses it on Escape.
+    const close = () => { overlay.dataset.open = 'false'; unregisterEscapeable(overlay) }
+    const open = () => { overlay.dataset.open = 'true'; registerEscapeable(overlay, close) }
+    const toggle = () => { if (overlay.dataset.open === 'true') close(); else open() }
     closeBtn.addEventListener('click', close)
     toggleButton.addEventListener('click', toggle)
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close() })

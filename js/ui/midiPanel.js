@@ -6,6 +6,7 @@
  * styling.
  */
 import { MIDI_TARGETS } from '../midi.js'
+import { registerEscapeable, unregisterEscapeable } from 'handfish'
 
 export function buildMidiPanel(container, { onEnable, onLearn, onClear } = {}) {
     const rows = new Map() // target id → { sigEl, learnBtn }
@@ -58,10 +59,14 @@ export function buildMidiPanel(container, { onEnable, onLearn, onClear } = {}) {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) hide() })
     container.appendChild(overlay)
 
-    function hide() { overlay.dataset.open = 'false' }
+    function hide() {
+        overlay.dataset.open = 'false'
+        unregisterEscapeable(overlay)
+    }
 
     return {
-        open() { overlay.dataset.open = 'true' },
+        // Register on the handfish escape stack (topmost close on Escape).
+        open() { overlay.dataset.open = 'true'; registerEscapeable(overlay, hide) },
         close: hide,
         get isOpen() { return overlay.dataset.open === 'true' },
         setStatus(s) { status.textContent = s },

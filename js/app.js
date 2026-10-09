@@ -15,8 +15,10 @@
 
 // Importing handfish registers the web components used by the UI
 // (select-dropdown, slider-value, tempo-bar) and provides the About dialog +
-// tooltip initializer for the industrial top bar.
-import { AboutDialog, initializeTooltips } from 'handfish'
+// tooltip initializer for the industrial top bar. initEscapeHandler wires the
+// global Escape handler for the handfish escape stack the overlay panels
+// register with (once at boot; double-registration corrupts close ordering).
+import { AboutDialog, initializeTooltips, initEscapeHandler } from 'handfish'
 import { logoSvg } from './ui/logo.js'
 import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
@@ -592,6 +594,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // anchors upper-right; tooltips activate the .tooltip data-title hints.
     topbar.appendChild(topbarCluster)
     initializeTooltips()
+    initEscapeHandler()
 
     // Default layout: a live camera, a (still-empty) file input, and two
     // test-pattern references. Resilient — a denied camera or missing
