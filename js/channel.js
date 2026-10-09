@@ -25,6 +25,7 @@ export class Channel {
         this.canvas = canvas
         this._driverFactory = driverFactory
         this._source = EMPTY_SOURCE
+        this._runtime = {} // the payload (e.g. a File) the source was applied with
         this._driver = null
         this._attempt = 0
     }
@@ -49,7 +50,9 @@ export class Channel {
     setSource(source, runtime = {}) {
         this._releaseDriver()
         const previous = this._source
+        const previousRuntime = this._runtime
         this._source = source || EMPTY_SOURCE
+        this._runtime = runtime
         if (sourceKind(this._source) === 'empty') {
             // The channel is explicitly empty now: a start still in flight
             // must not resurrect its source when it fails.
@@ -66,7 +69,7 @@ export class Channel {
         const started = this._driver.start()
         if (started && typeof started.catch === 'function') {
             return started.catch((err) => {
-                if (attempt === this._attempt) this._fallBack(previous)
+                if (attempt === this._attempt) this._fallBack(previous, previousRuntime)
                 throw err
             })
         }
@@ -82,10 +85,14 @@ export class Channel {
      * already replaced this state by the time it runs (guarded by the
      * attempt token).
      */
-    _fallBack(previous) {
+    _fallBack(previous, previousRuntime) {
         const attempt = this._attempt
         this._releaseDriver()
         this._source = previous
+        // The fallback re-applies the source it is restoring — including the
+        // runtime payload it was originally applied with (an uploaded file's
+        // File handle travels only through runtime).
+        this._runtime = previousRuntime || {}
         if (sourceKind(previous) === 'empty') {
             this._driver = null
             return
@@ -93,7 +100,7 @@ export class Channel {
         this._driver = this._driverFactory(previous, {
             canvas: this.canvas,
             channel: this,
-            runtime: {},
+            runtime: this._runtime,
         })
         const restart = this._driver.start()
         if (restart && typeof restart.catch === 'function') {
@@ -128,6 +135,7 @@ export class Channel {
         this._attempt++
         this._releaseDriver()
         this._source = EMPTY_SOURCE
+        this._runtime = {}
     }
 
     _releaseDriver() {

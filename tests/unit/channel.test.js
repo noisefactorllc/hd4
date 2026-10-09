@@ -249,6 +249,23 @@ test('a failed start does not rebuild a driver after dispose()', async () => {
     assert.deepEqual(factory.drivers[0].calls, ['start', 'stop'], 'no driver was built after teardown')
 })
 
+test('a fallback re-applies the previous source with its original runtime payload', async () => {
+    const factory = makePlannedFactory(['ok', 'fail', 'ok'])
+    const ch = makeChannel({ driverFactory: factory })
+    const file = { name: 'clip.mp4' } // stand-in for a File handle
+    ch.setSource(createSource('video', { name: 'clip.mp4' }), { file })
+
+    await assert.rejects(
+        ch.setSource(createSource('camera', { deviceId: 'cam-1' })),
+        /no camera/,
+    )
+
+    assert.equal(ch.source.type, 'video')
+    assert.equal(ch.driver, factory.drivers[2])
+    assert.equal(factory.drivers[2].ctx.runtime.file, file, 'the File handle survives the fallback')
+    assert.equal(ch.source.name, 'clip.mp4')
+})
+
 function sourceCalls(factory) {
     return factory.drivers[0].calls.join(',')
 }
