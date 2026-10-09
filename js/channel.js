@@ -26,6 +26,7 @@ export class Channel {
         this._driverFactory = driverFactory
         this._source = EMPTY_SOURCE
         this._driver = null
+        this._attempt = 0
     }
 
     get source() { return this._source }
@@ -38,18 +39,73 @@ export class Channel {
      * first, then (for a non-empty source) builds a fresh driver and
      * starts it. Returns whatever the driver's start() returns (a
      * promise for async acquisition like getUserMedia).
+     *
+     * A start that rejects never produced a frame, so the previous
+     * source is put back on screen before the rejection propagates: a
+     * denied camera or a vanished device must not leave a dead input
+     * selected. (Only sync drivers may return a non-promise from
+     * start(); those cannot fail here.)
      */
     setSource(source, runtime = {}) {
         this._releaseDriver()
+        const previous = this._source
         this._source = source || EMPTY_SOURCE
-        if (sourceKind(this._source) === 'empty') return undefined
+        if (sourceKind(this._source) === 'empty') {
+            // The channel is explicitly empty now: a start still in flight
+            // must not resurrect its source when it fails.
+            this._attempt++
+            return undefined
+        }
 
+        const attempt = ++this._attempt
         this._driver = this._driverFactory(this._source, {
             canvas: this.canvas,
             channel: this,
             runtime,
         })
-        return this._driver.start()
+        const started = this._driver.start()
+        if (started && typeof started.catch === 'function') {
+            return started.catch((err) => {
+                if (attempt === this._attempt) this._fallBack(previous)
+                throw err
+            })
+        }
+        return started
+    }
+
+    /**
+     * Restore the source that was live before a failed start. The
+     * fallback is rebuilt without the failed attempt's runtime payload
+     * (a File belongs to that attempt); if even it cannot start, the
+     * channel settles empty — there is nothing further to fall back to.
+     * Synchronous, so a second setSource during the wait above has
+     * already replaced this state by the time it runs (guarded by the
+     * attempt token).
+     */
+    _fallBack(previous) {
+        const attempt = this._attempt
+        this._releaseDriver()
+        this._source = previous
+        if (sourceKind(previous) === 'empty') {
+            this._driver = null
+            return
+        }
+        this._driver = this._driverFactory(previous, {
+            canvas: this.canvas,
+            channel: this,
+            runtime: {},
+        })
+        const restart = this._driver.start()
+        if (restart && typeof restart.catch === 'function') {
+            restart.catch(() => {
+                // Nothing further to fall back to: settle empty. Another
+                // setSource since means it owns the channel now.
+                if (attempt !== this._attempt) return
+                this._releaseDriver()
+                this._source = EMPTY_SOURCE
+                this._driver = null
+            })
+        }
     }
 
     /** Convenience: go back to the empty source. */
@@ -66,8 +122,10 @@ export class Channel {
     /** Re-apply a persisted source snapshot. */
     restore(obj) { return this.setSource(deserializeSource(obj)) }
 
-    /** Full teardown — stop the driver and reset to empty. */
+    /** Full teardown — stop the driver and reset to empty. A start still
+     *  in flight must not rebuild a driver after the teardown. */
     dispose() {
+        this._attempt++
         this._releaseDriver()
         this._source = EMPTY_SOURCE
     }

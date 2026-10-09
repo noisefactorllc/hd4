@@ -344,10 +344,20 @@ async function bootInto({ container = null, audioContext = null, destination = n
 
     // --- Multiview (source monitors) ---
     const multiview = buildMultiview(byId('hd4-sources'), state.channels, {
-        onSelectSource: (index, choice) => applySourceChoice(index, choice).then(() => {
-            multiview.refresh()
-            if (choice.type === 'camera') refreshCameras() // re-enumerate for device labels
-        }),
+        onSelectSource: (index, choice) => {
+            // The rejection handler covers only the application itself (the
+            // channel has already fallen back to its previous source via
+            // Channel.setSource): warn and re-sync the picker, which still
+            // sits on the choice that failed. A two-argument then keeps a
+            // throw in the success path out of that guard.
+            return applySourceChoice(index, choice).then(() => {
+                multiview.refresh()
+                if (choice.type === 'camera') refreshCameras() // re-enumerate for device labels
+            }, (e) => {
+                console.warn(`[hd4] channel ${index + 1} source was not applied`, e?.message || e)
+                multiview.refresh()
+            })
+        },
         onSetFit: (index, mode) => state.renderers[index].setFitMode(mode),
         getFit: (index) => state.renderers[index].fitMode,
         onSetAutoInclude: (index, on) => autoMix.setIncluded(index + 1, on),

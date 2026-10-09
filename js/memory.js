@@ -186,7 +186,15 @@ export function captureSnapshot({ channels, switcher, output, compositor, audio,
 export function applySnapshot(snap, { channels, switcher, output, compositor, audio, renderers, preview }) {
     if (!snap) return
     if (Array.isArray(snap.channels)) {
-        snap.channels.forEach((src, i) => channels[i]?.restore(src))
+        // A restore whose driver fails to start (a denied camera in a
+        // recalled slot) falls back on the channel itself; swallow the
+        // rejection so one bad source cannot surface unhandled.
+        snap.channels.forEach((src, i) => {
+            const restored = channels[i]?.restore(src)
+            if (restored && typeof restored.catch === 'function') {
+                restored.catch((e) => console.warn(`[hd4] channel ${i + 1} source was not recalled`, e?.message || e))
+            }
+        })
     }
     if (Array.isArray(snap.fits)) {
         snap.fits.forEach((mode, i) => {

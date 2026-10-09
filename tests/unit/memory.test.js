@@ -215,6 +215,29 @@ test('applySnapshot tolerates modules without renderers/preview', () => {
     assert.ok(calls.includes('restore'))
 })
 
+test('applySnapshot survives a channel whose restore rejects', async (t) => {
+    t.mock.method(console, 'warn', () => {})
+    const calls = []
+    const modules = {
+        channels: [
+            { restore: () => Promise.reject(new Error('camera denied')) },
+            { restore: (s) => calls.push(s.type) },
+        ],
+        switcher: { setType: () => {}, setTime: () => {}, cut: () => {} },
+        output: { setVfx: () => {} },
+        audio: { setFader: () => {}, setMute: () => {}, setSolo: () => {}, setMainFader: () => {} },
+    }
+    const snap = {
+        version: 1,
+        channels: [{ type: 'camera', deviceId: 'cam-1' }, { type: 'shader', dsl: 'render(o0)', name: 'P' }],
+    }
+    applySnapshot(snap, modules)
+    // The rejecting restore must be handled, not left unhandled (Node fails
+    // the whole run on an unhandled rejection); the other channels apply.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.deepEqual(calls, ['shader'])
+})
+
 test('applySnapshot ignores fit modes it does not know and an out-of-range preview', () => {
     const calls = []
     const setFitMode = (m) => calls.push(['setFitMode', m])
