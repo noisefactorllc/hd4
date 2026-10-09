@@ -106,6 +106,18 @@ async function boot() {
  * the RAF loop and a `programCanvas` handle (the on-air canvas), so the rack
  * adapter can expose the program video without reaching into internals.
  */
+// initEscapeHandler attaches a document-level keydown listener and does not
+// guard against double registration — a second call makes one Escape press
+// close two stacked items (the handfish convention is exactly one close per
+// press). bootInto() runs per mounted rack module, so initialize it exactly
+// once per document.
+let escapeHandlerReady = false
+const initEscapeHandlerOnce = () => {
+    if (escapeHandlerReady) return
+    initEscapeHandler()
+    escapeHandlerReady = true
+}
+
 async function bootInto({ container = null, audioContext = null, destination = null } = {}) {
     const app = container || document.getElementById('app')
     if (app) app.dataset.booted = 'true'
@@ -594,7 +606,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // anchors upper-right; tooltips activate the .tooltip data-title hints.
     topbar.appendChild(topbarCluster)
     initializeTooltips()
-    initEscapeHandler()
+    initEscapeHandlerOnce()
 
     // Default layout: a live camera, a (still-empty) file input, and two
     // test-pattern references. Resilient — a denied camera or missing
