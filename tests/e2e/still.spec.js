@@ -74,6 +74,11 @@ test('the captured still is selectable as a channel image', async ({ page }) => 
         const [ch1, blue] = await page.evaluate(() => [window.__hd4.sampleChannelAvg(0), window.__hd4.sampleChannelAvg(2)])
         return dist(ch1, blue) // ch1 now shows the Blue still
     }, { timeout: 15_000 }).toBeLessThan(40)
+    // The picker reflects the channel's actual source: a captured still is
+    // Still capture, not Image file…
+    await expect.poll(async () => page.evaluate(() =>
+        document.querySelector('.hd4-monitor[data-channel="1"] .hd4-source-select').value,
+    )).toBe('still')
 })
 
 test('a memory slot keeps a reference to the still, which recalls from IndexedDB after a reload', async ({ page }) => {
@@ -111,8 +116,26 @@ test('a memory slot keeps a reference to the still, which recalls from IndexedDB
     await page.reload()
     await page.waitForFunction(() => window.__hd4?.ready === true, null, { timeout: 30_000 })
     expect(await page.evaluate(() => window.__hd4.still.hasStill)).toBe(false)
+    // The slot names a stored still, so the pickers offer Still capture again
+    // even though nothing was captured this session.
+    const option = page.locator('.hd4-monitor[data-channel="1"] .hd4-source-select option[value="still"]')
+    await expect(option).toHaveCount(1)
+    await expect(option).toHaveText('Still capture')
     await page.click('.hd4-mem-slot[data-slot="1"]')
     expect(await page.evaluate(() => window.__hd4.channels[0].source)).toEqual({ type: 'image', name: 'Still', url: '', stillId })
     await expect.poll(async () => dist(await page.evaluate(() => window.__hd4.sampleChannelAvg(0)), shown), { timeout: 15_000 }).toBeLessThan(40)
+    // The recalled channel's picker shows Still capture, not Image file….
+    await expect.poll(async () => page.evaluate(() =>
+        document.querySelector('.hd4-monitor[data-channel="1"] .hd4-source-select').value,
+    )).toBe('still')
+    // A channel can still be pointed at the still from its picker: it loads
+    // the stored copy by id (no capture happened this session).
+    await page.selectOption('.hd4-monitor[data-channel="2"] .hd4-source-select', 'still')
+    await expect.poll(async () => page.evaluate(() => window.__hd4.channels[1].source), { timeout: 15_000 })
+        .toEqual({ type: 'image', name: 'Still', url: '', stillId })
+    await expect.poll(async () => dist(await page.evaluate(() => window.__hd4.sampleChannelAvg(1)), shown), { timeout: 15_000 }).toBeLessThan(40)
+    await expect.poll(async () => page.evaluate(() =>
+        document.querySelector('.hd4-monitor[data-channel="2"] .hd4-source-select').value,
+    )).toBe('still')
     expect(errors).toEqual([])
 })

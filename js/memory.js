@@ -158,6 +158,26 @@ export function referenceStills(snapshot, ids) {
     }
 }
 
+/**
+ * The still ids the occupied slots name, each once, in slot order. A slot
+ * keeps only the id of a still it shows (its bytes live in still storage),
+ * so this is what the pickers' Capture group availability reads: the option
+ * exists whenever a stored still a slot can name exists — after a reload and
+ * a recall too, not only after a fresh capture.
+ */
+export function slotStillIds(memory) {
+    const ids = []
+    for (const slot of memory.list()) {
+        const snapshot = memory.load(slot)
+        for (const src of Array.isArray(snapshot?.channels) ? snapshot.channels : []) {
+            if (src?.type === 'image' && typeof src.stillId === 'string' && !ids.includes(src.stillId)) {
+                ids.push(src.stillId)
+            }
+        }
+    }
+    return ids
+}
+
 export function captureSnapshot({ channels, switcher, output, compositor, audio, renderers, preview }) {
     return {
         version: 1,

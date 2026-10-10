@@ -13,6 +13,7 @@ import {
     MEMORY_SLOTS,
     embeddedStills,
     referenceStills,
+    slotStillIds,
 } from '../../js/memory.js'
 import { PreviewBus } from '../../js/previewBus.js'
 
@@ -395,4 +396,30 @@ test('a corrupt slot is left alone by the move', async () => {
     storage.setItem('hd4.memory.4', '{not json')
     assert.equal(await new MemoryStore(storage).moveEmbeddedStills(async () => { throw new Error('must not be called') }), 0)
     assert.equal(slotText(storage, 4), '{not json')
+})
+
+// --- The still ids the slots name (the pickers' Capture availability) ---
+
+test('slotStillIds lists the still ids the occupied slots name, each once', () => {
+    const storage = fakeStorage()
+    const store = new MemoryStore(storage)
+    assert.deepEqual(slotStillIds(store), [])
+    store.save(2, { version: 1, channels: [{ type: 'image', name: 'Still', stillId: STILL_ID }] })
+    store.save(5, {
+        version: 1,
+        channels: [
+            { type: 'camera', deviceId: 'cam-1' },
+            { type: 'image', name: 'Still', stillId: STILL_ID },
+        ],
+    })
+    store.save(6, { version: 1, channels: [{ type: 'image', name: 'Still', stillId: 'd'.repeat(64) }] })
+    store.save(7, { version: 1, channels: [{ type: 'image', name: 'Test Card', url: 'img/testcard.png' }] })
+    assert.deepEqual(slotStillIds(store), [STILL_ID, 'd'.repeat(64)])
+})
+
+test('slotStillIds skips a slot it cannot read', () => {
+    const storage = fakeStorage()
+    storage.setItem('hd4.memory.1', '{not json')
+    storage.setItem('hd4.memory.3', JSON.stringify({ version: 1, channels: [{ type: 'image', name: 'Still', stillId: STILL_ID }] }))
+    assert.deepEqual(slotStillIds(new MemoryStore(storage)), [STILL_ID])
 })

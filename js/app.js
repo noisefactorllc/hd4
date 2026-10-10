@@ -34,7 +34,7 @@ import { ProgramCompositor } from './programCompositor.js'
 import { OutputState } from './outputState.js'
 import { CompositorState } from './compositorState.js'
 import { AudioMixer } from './audio/mixer.js'
-import { MemoryStore, captureSnapshot, applySnapshot } from './memory.js'
+import { MemoryStore, captureSnapshot, applySnapshot, slotStillIds } from './memory.js'
 import { StillStore } from './still.js'
 import { getStill, memoryStillsMigrated, migrateMemoryStills, storeEmbeddedStills } from './stillStorage.js'
 import { Recorder, recordingFilename } from './recorder.js'
@@ -368,6 +368,31 @@ async function bootInto({ container = null, audioContext = null, destination = n
         navigator.mediaDevices.addEventListener('devicechange', refreshCameras)
     }
 
+    // The Capture group of every picker holds the Still capture option
+    // whenever a still is available to pick: one captured this session, or
+    // any stored still the memory slots name (which survives a reload).
+    const refreshStillAvailable = () => {
+        multiview.setStillAvailable(stillStore.hasStill || slotStillIds(memory).length > 0)
+    }
+
+    // Re-source every channel showing the still, so a re-capture propagates
+    // everywhere (the KEY path already tracks the live buffer) and the
+    // sources name the still's stored copy by id.
+    const refreshStillSources = () => {
+        state.channels.forEach((ch) => {
+            const s = ch.source
+            if (s?.type === 'image' && s.name === 'Still') {
+                ch.setSource(createSource('image', {
+                    url: stillStore.dataUrl,
+                    name: 'Still',
+                    stillId: stillStore.stillId,
+                }))
+                    .then(() => multiview.refresh())
+                    .catch(() => {})
+            }
+        })
+    }
+
     // Capture the current program as a still: feeds the KEY "STILL" source
     // and becomes selectable as a channel image.
     const captureStill = () => {
@@ -378,17 +403,19 @@ async function bootInto({ container = null, audioContext = null, destination = n
         const source = k.on && k.sourceCh === 5 ? compositor.cleanCanvas : programView.canvas
         if (!stillStore.capture(source)) return
         compositor.setStill(stillStore.canvas) // KEY STILL reads this live buffer
-        multiview.setStillAvailable(true)
+        refreshStillAvailable()
         // Refresh any channel already sourced from the still so a re-capture
         // propagates everywhere (the KEY path already tracks the live buffer).
-        state.channels.forEach((ch) => {
-            const s = ch.source
-            if (s?.type === 'image' && s.name === 'Still') {
-                ch.setSource(createSource('image', { url: stillStore.dataUrl, name: 'Still' }))
-                    .then(() => multiview.refresh())
-                    .catch(() => {})
-            }
-        })
+        refreshStillSources()
+        // Store the still's bytes, so the channels showing it can name the
+        // stored copy by its id: the pickers then keep Still capture selected,
+        // and a save keeps only the id (a slot never carries the pixels).
+        // Until the bytes commit the sources keep the data URL, and a save
+        // stores the still itself — as they did before still storage.
+        storeEmbeddedStills([stillStore.dataUrl]).then((ids) => {
+            stillStore.stillId = ids.get(stillStore.dataUrl) || null
+            if (stillStore.stillId) refreshStillSources()
+        }).catch((e) => console.warn('[hd4] the still could not be stored', e?.message || e))
     }
 
     // --- Recording (program canvas + main/AUX audio → file) ---
@@ -449,8 +476,10 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // Non-blocking; saves wait for it.
     migrateMemoryStills(memory).catch((e) => console.error('[hd4] could not move memory stills', e))
     const modules = { channels: state.channels, switcher, output, compositor: compositorState, audio, renderers: state.renderers, preview: previewBus }
+    state.memory = memory
     const refreshAfterRecall = () => {
         multiview.refresh() // re-reads each tile's fit toggle from its renderer
+        refreshStillAvailable() // the recalled slots may name a stored still
         transitionBar.setType(switcher.type)
         transitionBar.setTime(switcher.time)
         outputBar.setVfx(output.vfx)
@@ -635,6 +664,11 @@ async function bootInto({ container = null, audioContext = null, destination = n
         ch.setSource(defaultSources[i]).catch((e) => console.warn(`[hd4] default source ${i + 1}`, e?.message || e)),
     ))
     multiview.refresh()
+    // The slots may name a stored still from an earlier session: offer it in
+    // the pickers from boot. A later migration can only add ids (it moves old
+    // saves' still text into still storage), so re-check when it settles.
+    refreshStillAvailable()
+    memoryStillsMigrated().then(refreshStillAvailable)
     refreshCameras() // default camera (ch1) has granted permission → labels available
     refreshAudioInputs()
 
@@ -813,7 +847,21 @@ async function applySourceChoice(index, choice) {
     } else if (choice.type === 'video' || choice.type === 'image') {
         await ch.setSource(createSource(choice.type, { name: choice.file.name }), { file: choice.file })
     } else if (choice.type === 'still') {
-        if (state.still?.dataUrl) await ch.setSource(createSource('image', { url: state.still.dataUrl, name: 'Still' }))
+        const still = state.still
+        if (still?.dataUrl) {
+            await ch.setSource(createSource('image', {
+                url: still.dataUrl,
+                name: 'Still',
+                stillId: still.stillId,
+            }))
+        } else {
+            // No still captured this session (e.g. right after a reload):
+            // re-apply the stored still the memory slots name, the way a
+            // recall restores one.
+            const id = slotStillIds(state.memory)[0]
+            const blob = id ? await getStill(id) : null
+            if (blob) await ch.setSource(createSource('image', { name: 'Still', stillId: id }))
+        }
     }
 }
 

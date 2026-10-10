@@ -7,7 +7,7 @@
  * reports the user's choice via onSelectSource; the app applies it.
  */
 import { SOURCE_LIBRARY, presetByDsl } from '../sources/presets.js'
-import { sourceKind } from '../sources/sourceModel.js'
+import { isStillId, sourceKind } from '../sources/sourceModel.js'
 
 export function buildMultiview(container, channels, {
     onSelectSource, onSetFit, getFit, onSetAutoInclude, getAutoInclude, cameras = [],
@@ -184,8 +184,13 @@ function buildSourcePicker(index, onSelectSource) {
     return { control, select, updateCameras, setStillAvailable }
 }
 
-/** Reflect the channel's actual source in the picker where we can. */
-function setSelectValue(select, source) {
+/**
+ * Reflect the channel's actual source in the picker where we can. An image
+ * the channel shows as a captured still (it names one by id) selects the
+ * Still capture option; an image loaded from a file selects Image file….
+ * Exported for the unit suite: the selection mapping is pure.
+ */
+export function setSelectValue(select, source) {
     const has = (v) => [...select.options].some((o) => o.value === v)
     if (source?.type === 'shader') {
         const preset = presetByDsl(source.dsl)
@@ -194,7 +199,7 @@ function setSelectValue(select, source) {
         const byDevice = `camera:${source.deviceId}`
         select.value = (source.deviceId && has(byDevice)) ? byDevice : 'camera'
     } else if (source?.type === 'video' || source?.type === 'image') {
-        select.value = source.type
+        select.value = (source.type === 'image' && isStillId(source.stillId)) ? 'still' : source.type
     }
     // The picker is width-constrained; surface the full choice on hover.
     select.title = select.selectedOptions[0]?.textContent || ''

@@ -72,3 +72,13 @@ test('clear() empties the store', () => {
     assert.equal(s.canvas, null)
     assert.equal(s.dataUrl, null)
 })
+
+test('a capture names no stored copy until its bytes are stored; clear() forgets the id', () => {
+    const s = new StillStore({ createCanvas: fakeCanvasFactory() })
+    s.stillId = 'c'.repeat(64)
+    s.capture({ width: 960, height: 540 })
+    assert.equal(s.stillId, null, 'a re-capture is a new still: the old id named the old bytes')
+    s.stillId = 'c'.repeat(64)
+    s.clear()
+    assert.equal(s.stillId, null)
+})
