@@ -411,11 +411,12 @@ async function bootInto({ container = null, audioContext = null, destination = n
         // stored copy by its id: the pickers then keep Still capture selected,
         // and a save keeps only the id (a slot never carries the pixels).
         // Until the bytes commit the sources keep the data URL, and a save
-        // stores the still itself — as they did before still storage.
-        storeEmbeddedStills([stillStore.dataUrl]).then((ids) => {
-            stillStore.stillId = ids.get(stillStore.dataUrl) || null
-            if (stillStore.stillId) refreshStillSources()
-        }).catch((e) => console.warn('[hd4] the still could not be stored', e?.message || e))
+        // stores the still itself — as they did before still storage. The id
+        // is adopted on the still the run stored: a store still committing
+        // when a re-capture lands must not name the newer bytes.
+        stillStore.store(storeEmbeddedStills)
+            .then((id) => { if (id) refreshStillSources() })
+            .catch((e) => console.warn('[hd4] the still could not be stored', e?.message || e))
     }
 
     // --- Recording (program canvas + main/AUX audio → file) ---

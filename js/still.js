@@ -41,4 +41,24 @@ export class StillStore {
         this.dataUrl = null
         this.stillId = null
     }
+
+    /**
+     * Store the current still's bytes through `store` (stillStorage's
+     * storeEmbeddedStills) and adopt the resulting id. A store still in
+     * flight when the still is re-captured (or cleared) must not name the
+     * newer bytes: it adopts nothing, and the newer capture's own store
+     * run owns the id. Resolves to the adopted id, or null when there is
+     * no still or the run was superseded mid-flight.
+     *
+     * @param {(dataUrls: string[]) => Promise<Map<string, string>>} store
+     * @returns {Promise<string|null>}
+     */
+    async store(store) {
+        const dataUrl = this.dataUrl
+        if (!dataUrl) return null
+        const ids = await store([dataUrl])
+        if (this.dataUrl !== dataUrl) return null // superseded mid-flight
+        this.stillId = ids.get(dataUrl) || null
+        return this.stillId
+    }
 }

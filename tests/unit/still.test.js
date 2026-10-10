@@ -82,3 +82,53 @@ test('a capture names no stored copy until its bytes are stored; clear() forgets
     s.clear()
     assert.equal(s.stillId, null)
 })
+
+test('store() adopts the id of the still it stored', async () => {
+    const s = new StillStore({ createCanvas: fakeCanvasFactory() })
+    s.capture({ width: 960, height: 540 })
+    const id = await s.store((urls) => Promise.resolve(new Map([[urls[0], 'a'.repeat(64)]])))
+    assert.equal(id, 'a'.repeat(64))
+    assert.equal(s.stillId, 'a'.repeat(64))
+})
+
+test('store() with no still stores nothing and resolves null', async () => {
+    const s = new StillStore({ createCanvas: fakeCanvasFactory() })
+    let calls = 0
+    const id = await s.store(() => { calls++; return Promise.resolve(new Map()) })
+    assert.equal(id, null)
+    assert.equal(calls, 0)
+})
+
+test('a store overtaken by a re-capture adopts nothing; the newer run owns the id', async () => {
+    const s = new StillStore({ createCanvas: fakeCanvasFactory() })
+    s.capture({ width: 960, height: 540 })
+    const urlA = s.dataUrl
+    let resolveA
+    const storeA = s.store(() => new Promise((r) => { resolveA = r }))
+    s.capture({ width: 640, height: 360 }) // supersedes A while A's bytes are still committing
+    const urlB = s.dataUrl
+    let resolveB
+    const storeB = s.store(() => new Promise((r) => { resolveB = r }))
+    assert.equal(s.stillId, null, 'neither still is stored yet')
+    // The newer run commits first, then the stale one settles: the stale run
+    // must adopt nothing, or it would strip the newer still's id (and a save
+    // would fall back to carrying the still as data-URL text).
+    resolveB(new Map([[urlB, 'b'.repeat(64)]]))
+    assert.equal(await storeB, 'b'.repeat(64))
+    assert.equal(s.stillId, 'b'.repeat(64))
+    resolveA(new Map([[urlA, 'a'.repeat(64)]]))
+    assert.equal(await storeA, null)
+    assert.equal(s.stillId, 'b'.repeat(64), 'the stale run must not name the newer bytes')
+})
+
+test('store() resolving after clear() adopts nothing', async () => {
+    const s = new StillStore({ createCanvas: fakeCanvasFactory() })
+    s.capture({ width: 960, height: 540 })
+    const url = s.dataUrl
+    let resolveA
+    const storeA = s.store(() => new Promise((r) => { resolveA = r }))
+    s.clear()
+    resolveA(new Map([[url, 'a'.repeat(64)]]))
+    assert.equal(await storeA, null)
+    assert.equal(s.stillId, null)
+})
