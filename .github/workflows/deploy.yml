@@ -1,13 +1,13 @@
 name: Deploy
 
-# Scaffold is the sole authority for hd4 deploys. This workflow just
-# fires the workflow_dispatch at scaffold's static-site-release, which
-# clones this repo at the pushed SHA, stages a clean tree
+# The site release workflow is the sole authority for hd4 deploys. This
+# workflow just fires its workflow_dispatch; the release clones this repo
+# at the pushed SHA, stages a clean tree
 # (index.html + css/ + js/ + img/), writes deployment-meta.json, and
 # publishes it to hd4.noisefactor.io.
 #
-# This repo carries no deploy secrets — only the EHSRE app private key,
-# which is scoped to dispatching scaffold workflows. It is a repo-level
+# This repo carries no deploy secrets — only the GitHub App private key,
+# which is scoped to dispatching release workflows. It is a repo-level
 # secret: the org-level copy reaches private repos only.
 
 on:
@@ -28,28 +28,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  trigger-scaffold-release:
-    name: Dispatch scaffold static-site-release
+  dispatch-release:
+    name: Dispatch the site release
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
 
     steps:
-      - name: Mint scaffold GitHub App token
+      - name: Check the release dispatch configuration
+        env:
+          RELEASE_REPOSITORY: ${{ secrets.RELEASE_REPOSITORY }}
+          STATIC_SITE_RELEASE_WORKFLOW: ${{ secrets.STATIC_SITE_RELEASE_WORKFLOW }}
+        run: |
+          missing=""
+          [ -n "$RELEASE_REPOSITORY" ] || missing="$missing RELEASE_REPOSITORY"
+          [ -n "$STATIC_SITE_RELEASE_WORKFLOW" ] || missing="$missing STATIC_SITE_RELEASE_WORKFLOW"
+          if [ -n "$missing" ]; then
+            echo "::error::The release dispatch is not configured. Empty or unset secret(s):$missing"
+            exit 1
+          fi
+
+      - name: Mint release GitHub App token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: Iv23liy6T6BW0BXuZRzx
           private-key: ${{ secrets.EHSRE_APP_PRIVATE_KEY }}
           owner: noisefactorllc
-          repositories: scaffold
+          repositories: ${{ secrets.RELEASE_REPOSITORY }}
 
-      - name: Dispatch scaffold static-site-release for hd4
+      - name: Dispatch the site release for hd4
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_REPOSITORY: ${{ secrets.RELEASE_REPOSITORY }}
+          STATIC_SITE_RELEASE_WORKFLOW: ${{ secrets.STATIC_SITE_RELEASE_WORKFLOW }}
         run: |
-          gh workflow run static-site-release.yml \
-            --repo noisefactorllc/scaffold \
+          gh workflow run "$STATIC_SITE_RELEASE_WORKFLOW" \
+            --repo "$GITHUB_REPOSITORY_OWNER/$RELEASE_REPOSITORY" \
             --ref main \
             -f site=hd4 \
             -f sha=${{ github.sha }}
-          echo "Dispatched scaffold static-site-release for hd4 @ ${{ github.sha }}"
+          echo "Dispatched the site release for hd4 @ ${{ github.sha }}"
