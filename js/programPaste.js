@@ -144,13 +144,15 @@ export function isTextEntry(el) {
  * With a scope (HD4's root in the rack, which shares the page with other
  * modules), only pastes meant for HD4 are taken: those aimed inside the
  * scope, and those made with nothing focused when the last pointer press
- * was inside it. A click on a monitor leaves nothing focused, so Cmd/Ctrl+V
- * still works after it. (With nothing focused, Chromium aims the paste at
- * the selection, so the focus decides, not the event's target.)
+ * was inside it, with focus not moved to another module since. A click on
+ * a monitor leaves nothing focused, so Cmd/Ctrl+V still works after it.
+ * (With nothing focused, Chromium aims the paste at the selection, so the
+ * focus decides, not the event's target.)
  */
 export function attachProgramPaste(onPaste, target = document, { isSuspended, scope = null } = {}) {
     let pressedInside = false
     const onPointerDown = (e) => { pressedInside = !!scope?.contains(e.target) }
+    const onFocusIn = (e) => { if (!scope?.contains(e.target)) pressedInside = false }
     const nothingFocused = () => !target.activeElement || target.activeElement === target.body
     const inScope = (el) => !scope || scope.contains(el) || (pressedInside && nothingFocused())
     const onPasteEvent = (e) => {
@@ -163,9 +165,15 @@ export function attachProgramPaste(onPaste, target = document, { isSuspended, sc
         onPaste(e.clipboardData?.getData('text/plain') || '')
     }
     target.addEventListener('paste', onPasteEvent)
-    if (scope) target.addEventListener('pointerdown', onPointerDown, true)
+    if (scope) {
+        target.addEventListener('pointerdown', onPointerDown, true)
+        target.addEventListener('focusin', onFocusIn, true)
+    }
     return () => {
         target.removeEventListener('paste', onPasteEvent)
-        if (scope) target.removeEventListener('pointerdown', onPointerDown, true)
+        if (scope) {
+            target.removeEventListener('pointerdown', onPointerDown, true)
+            target.removeEventListener('focusin', onFocusIn, true)
+        }
     }
 }

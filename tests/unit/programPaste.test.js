@@ -89,14 +89,20 @@ test('text fields take their own paste; other controls do not', () => {
 function fakeTarget() {
     const listeners = new Set()
     const presses = new Set()
+    const focuses = new Set()
     const body = { tagName: 'BODY' }
     return {
         body,
         activeElement: body,
-        addEventListener(type, fn) { if (type === 'paste') listeners.add(fn); if (type === 'pointerdown') presses.add(fn) },
-        removeEventListener(type, fn) { listeners.delete(fn); presses.delete(fn) },
-        get count() { return listeners.size + presses.size },
+        addEventListener(type, fn) {
+            if (type === 'paste') listeners.add(fn)
+            if (type === 'pointerdown') presses.add(fn)
+            if (type === 'focusin') focuses.add(fn)
+        },
+        removeEventListener(type, fn) { listeners.delete(fn); presses.delete(fn); focuses.delete(fn) },
+        get count() { return listeners.size + presses.size + focuses.size },
         press(target) { for (const fn of presses) fn({ target }) },
+        focus(target) { this.activeElement = target; for (const fn of focuses) fn({ target }) },
         paste(text, { target = body, path = null, defaultPrevented = false } = {}) {
             const e = {
                 target,
@@ -415,10 +421,23 @@ test('in a scope, a press inside does not take a paste focused on another module
     assert.deepEqual(got, [])
 })
 
-test('the scoped teardown removes the press listener too', () => {
+test('in a scope, focus moved to another module since the press is no paste for HD4', () => {
+    const target = fakeTarget()
+    const monitor = { tagName: 'CANVAS' }
+    const other = { tagName: 'BUTTON' }
+    const got = []
+    attachProgramPaste((text) => got.push(text), target, { scope: fakeScope(monitor) })
+    target.press(monitor)
+    target.focus(other) // tabbed into another module…
+    target.activeElement = target.body // …whose control then went away
+    target.paste('a')
+    assert.deepEqual(got, [])
+})
+
+test('the scoped teardown removes the press and focus listeners too', () => {
     const target = fakeTarget()
     const detach = attachProgramPaste(() => {}, target, { scope: fakeScope() })
-    assert.equal(target.count, 2)
+    assert.equal(target.count, 3)
     detach()
     assert.equal(target.count, 0)
 })

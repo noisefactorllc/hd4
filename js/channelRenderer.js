@@ -21,6 +21,11 @@ import {
 } from './noisemaker/bundle.js'
 import { computeFit } from './fit.js'
 
+// The longest an engine compile holds up the next one. A compile that never
+// settles (say, after a lost GPU context) must not freeze the channel: past
+// this, the next compile goes ahead while the stuck one keeps running.
+const ENGINE_TURN_LIMIT_MS = 10_000
+
 // `media()` with `search synth` resolves to "synth.media"; some code
 // paths spell it "synth/media". Accept either.
 const MEDIA_EFFECT_KEYS = new Set(['synth.media', 'synth/media'])
@@ -73,7 +78,8 @@ export class ChannelRenderer {
      * waited (effects can take seconds to download) is dropped, resolving
      * { success: false, superseded: true }, so it never replaces the newer
      * program on screen. Engine compiles run one at a time, so the newest
-     * program is always the last one compiled.
+     * program is always the last one compiled (unless one is stuck for
+     * longer than ENGINE_TURN_LIMIT_MS).
      */
     async compile(dsl) {
         const seq = ++this._compileSeq
@@ -83,7 +89,12 @@ export class ChannelRenderer {
             await this._loadEffectsFor(dsl)
             if (superseded()) return { success: false, superseded: true }
             const turn = this._engineTurn.then(() => (superseded() ? null : this._renderer.compile(dsl)))
-            this._engineTurn = turn.catch(() => { /* the compile reports its own error below */ })
+            let timer
+            const limit = new Promise((resolve) => { timer = setTimeout(resolve, ENGINE_TURN_LIMIT_MS) })
+            const settled = turn
+                .catch(() => { /* the compile reports its own error below */ })
+                .finally(() => clearTimeout(timer))
+            this._engineTurn = Promise.race([settled, limit])
             await turn
             if (superseded()) return { success: false, superseded: true }
             this._currentDsl = dsl

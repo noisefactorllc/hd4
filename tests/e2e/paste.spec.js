@@ -199,6 +199,24 @@ test('a newer choice made while an older program is still compiling in the engin
     expect(await page.evaluate(() => window.__ledLog.filter((l) => l.startsWith('PASTE')))).toEqual([])
 })
 
+test('an engine compile that never settles does not freeze the channel', async ({ page }) => {
+    await page.evaluate((dsl) => {
+        const inner = window.__hd4.renderers[1].inner
+        const compile = inner.compile.bind(inner)
+        window.__stuck = false
+        inner.compile = (d) => {
+            if (d === dsl) { window.__stuck = true; return new Promise(() => {}) }
+            return compile(d)
+        }
+    }, MAGENTA)
+    await pasteKeys(page, MAGENTA)
+    await page.waitForFunction(() => window.__stuck === true, null, { timeout: 15_000 })
+    await page.selectOption(picker(2), 'shader:Grid')
+    // The next compile goes ahead once the stuck one has held it for its limit (10 s).
+    await expect.poll(() => page.evaluate(() => window.__hd4.renderers[1].currentDsl), { timeout: 30_000 }).toBe(GRID)
+    expect(await page.evaluate(() => window.__hd4.channels[1].label)).toBe('Grid')
+})
+
 test('every library program passes the renderer check', async ({ page }) => {
     const problems = await page.evaluate(async () => {
         const { SHADER_PRESETS } = await import('/js/sources/presets.js')
