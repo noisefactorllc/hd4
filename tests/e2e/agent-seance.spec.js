@@ -126,6 +126,16 @@ test('an agent in the session drives the owner\'s tab and sees its monitors as i
         await expect.poll(async () => dist(await page.evaluate(() => window.__hd4.sampleChannelAvg(2)), [255, 0, 255])).toBeLessThan(40)
         await expect.poll(() => visitor.evaluate(() => window.__hd4.channels[2].source.dsl)).toBe(MAGENTA)
 
+        // Through the session a program reads as the session holds it.
+        const read = await agent.call('getProgram', { channel: 3 })
+        expect(read.envelope.result).toEqual({ channel: 3, source: 'shader', dsl: agent.docText('channel:3'), running: true })
+        expect(read.envelope.state.channels[0]).toMatchObject({ channel: 1, source: 'camera', name: 'Camera', chars: 0 })
+
+        // An image never crosses the session as text.
+        const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
+        const asText = await agent.call('setProgram', { dsl: `search synth\nmedia(url: "${pixel}").write(o0)\nrender(o0)`, channel: 3 })
+        expect(asText.envelope.error.code).toBe('IMAGE_AS_TEXT')
+
         // A program that does not compile is refused and changes nothing.
         const refused = await agent.call('setProgram', { dsl: 'search synth\nsolid(colour: #ff0000).write(o0)\nrender(o0)', channel: 3 })
         expect(refused.envelope.error.code).toBe('INVALID_PROGRAM')
@@ -134,6 +144,14 @@ test('an agent in the session drives the owner\'s tab and sees its monitors as i
         // A switch through the session.
         const taken = await agent.call('take', { channel: 3, transition: 'cut' })
         expect(taken.envelope.result).toEqual({ live: 3, preview: 2, transitioning: false })
+
+        // While the camera feeds channel 1 no image leaves the tab, not even of another channel.
+        const hidden = await agent.call('getThumbnail', { maxDimension: 48, format: 'png', source: 3 })
+        expect(hidden.envelope.error).toMatchObject({ code: 'REMOTE_UNAVAILABLE', details: { reason: 'channel 1 shows a camera' } })
+        expect(uploads).toEqual([])
+        // The person replaces the camera; the built-in test card on channel 2 may be seen.
+        await page.selectOption('.hd4-monitor[data-channel="1"] .hd4-source-select', 'shader:Black')
+        await expect.poll(() => page.evaluate(() => window.__hd4.channels[0].source.type)).toBe('shader')
 
         // getThumbnail: the image is uploaded as its own bytes and named by its SHA-256.
         const look = await agent.call('getThumbnail', { maxDimension: 48, format: 'png', source: 3 })
@@ -148,6 +166,12 @@ test('an agent in the session drives the owner\'s tab and sees its monitors as i
         expect(uploads.some((upload) => upload.type === 'image/png' && upload.body.equals(image.bytes))).toBe(true)
         // Images are images: no WebSocket frame from the tab carried image text.
         expect(sent.filter((frame) => frame.includes(image.bytes.toString('base64')) || /data:image|[A-Za-z0-9+/]{200,}/.test(frame))).toEqual([])
+
+        // FREEZE can hold a frame of a camera, so it hides images too.
+        await page.evaluate(() => window.HD4Agent.setOutput({ freeze: true }))
+        const frozen = await agent.call('getThumbnail', { maxDimension: 16 })
+        expect(frozen.envelope.error).toMatchObject({ code: 'REMOTE_UNAVAILABLE', details: { reason: 'FREEZE holds a frame' } })
+        await page.evaluate(() => window.HD4Agent.setOutput({ freeze: false }))
 
         // What needs the person at the browser, or what their browser keeps,
         // is refused through the session.
@@ -202,6 +226,8 @@ test('a program and its image move into a channel through the session', async ({
 test('the tab takes at most 16 images in ten minutes', async ({ page }) => {
     test.setTimeout(180_000)
     const code = await openOnline(page)
+    // No camera, so the tab may send images of the mix.
+    await page.selectOption('.hd4-monitor[data-channel="1"] .hd4-source-select', 'shader:Black')
     const agent = await joinSession(server, code)
     try {
         await agent.describe()
@@ -214,5 +240,40 @@ test('the tab takes at most 16 images in ten minutes', async ({ page }) => {
         expect(refused.envelope.error.details.retryAfter).toBeGreaterThan(500)
     } finally {
         agent.close()
+    }
+})
+
+test('a tab that inherits the session does not answer, and the person\'s tab answers again after a reload', async ({ page, browser }) => {
+    test.setTimeout(180_000)
+    const code = await openOnline(page)
+    const visitor = await browser.newPage()
+    const visitorSent = []
+    visitor.on('websocket', (socket) => socket.on('framesent', (frame) => visitorSent.push(String(frame.payload))))
+    await routeSeance(visitor, server)
+    await visitor.goto(`/?seance=${code}`)
+    await visitor.waitForFunction(() => window.__hd4?.ready === true && window.HD4Agent, null, { timeout: 30_000 })
+    await visitor.evaluate(() => window.HD4Agent.ready)
+    await expect.poll(() => visitor.evaluate(() => window.__hd4.online.getStatus())).toBe('online')
+    const agent = await joinSession(server, code)
+    try {
+        const first = await agent.describe()
+        const firstOwner = agent.ownerId
+
+        // The person's tab reloads: it took the session online, so it answers again.
+        await page.reload()
+        await page.waitForFunction(() => window.__hd4?.ready === true && window.HD4Agent, null, { timeout: 30_000 })
+        await expect.poll(() => page.evaluate(() => window.__hd4.online.getStatus())).toBe('online')
+        await expect.poll(async () => (await agent.describe({ timeoutMs: 3000 }).catch(() => null))?.from, { timeout: 30_000 }).not.toBe(first.from)
+        expect((await agent.call('getState')).envelope.ok).toBe(true)
+
+        // The person's tab leaves for good. Seance hands the session to another
+        // participant, but no tab that did not take the session online answers.
+        await page.close()
+        await expect.poll(() => agent.ownerId, { timeout: 20_000 }).not.toBe(firstOwner)
+        await expect(agent.describe({ timeoutMs: 3000 })).rejects.toThrow('describe: no reply')
+        expect(visitorSent.filter((frame) => frame.includes('nf-agent/1'))).toEqual([])
+    } finally {
+        agent.close()
+        await visitor.close()
     }
 })

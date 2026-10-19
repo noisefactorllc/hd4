@@ -45,9 +45,9 @@ export function commandError(code, message, details = {}) {
     return err
 }
 
-function safeSnapshot(ctx) {
+function safeSnapshot(ctx, options) {
     try {
-        return buildSnapshot(ctx)
+        return buildSnapshot(ctx, options)
     } catch (err) {
         console.warn('[agent] snapshot failed:', err)
         return null
@@ -63,24 +63,27 @@ const RUNNERS = new Map()
  * in-page method puts its bytes in the result as base64; runCommand hands the
  * Blob itself to transports that carry binary bytes.
  *
+ * `options.remote` is true for a command that came through a Seance session:
+ * the handler and the snapshot then show only what the session may see.
+ *
  * @param {object} agent - The HD4Agent object; `agent._ctx` holds app references.
  * @param {string} name - Command name.
- * @param {(args: object, ctx: object) => Promise<{result: any, image?: Blob, warnings?: Array}>} handler
+ * @param {(args: object, ctx: object, options: {remote?: boolean}) => Promise<{result: any, image?: Blob, warnings?: Array}>} handler
  */
 export function registerCommand(agent, name, handler) {
-    const run = (args = {}) => serialize(async () => {
+    const run = (args = {}, options = {}) => serialize(async () => {
         const ctx = agent._ctx
         try {
             await agent.ready
             const schema = SCHEMAS[name]
             if (schema) {
                 const v = validate(args, schema)
-                if (!v.ok) return { envelope: makeFailure(name, v.code, v.message, v.details, safeSnapshot(ctx)) }
+                if (!v.ok) return { envelope: makeFailure(name, v.code, v.message, v.details, safeSnapshot(ctx, options)) }
             }
-            const out = await handler(args, ctx)
-            return { envelope: makeSuccess(name, out.result, safeSnapshot(ctx), out.warnings || []), image: out.image || null }
+            const out = await handler(args, ctx, options)
+            return { envelope: makeSuccess(name, out.result, safeSnapshot(ctx, options), out.warnings || []), image: out.image || null }
         } catch (err) {
-            const state = safeSnapshot(ctx)
+            const state = safeSnapshot(ctx, options)
             if (err?.__agentError) {
                 const { code, message, details } = err.__agentError
                 return { envelope: makeFailure(name, code, message, details, state) }
@@ -95,12 +98,13 @@ export function registerCommand(agent, name, handler) {
 /**
  * Run a registered command for a transport that carries binary bytes.
  *
+ * @param {{remote?: boolean}} [options]
  * @returns {Promise<{envelope: object, image?: Blob}>}
  */
-export function runCommand(name, args = {}) {
+export function runCommand(name, args = {}, options = {}) {
     const run = RUNNERS.get(name)
     if (!run) return Promise.resolve({ envelope: makeFailure(name, 'NOT_FOUND_COMMAND', `Unknown command: ${name}`) })
-    return run(args)
+    return run(args, options)
 }
 
 async function inlineImage({ envelope, image }) {

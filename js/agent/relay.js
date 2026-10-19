@@ -4,13 +4,17 @@
  * `clicked-button` frames, and this tab runs them with the same dispatcher,
  * validation and account limits as the in-page API.
  *
- * Only the tab of the session's owner (the person who took the program online)
- * answers. Seance lets only writers send these frames, and it relays every
- * answer to everyone in the session, so commands that read or change the
- * person's private data stay out of the relay (`remote: false`).
+ * Only the tab that took this session online answers, and only while it is the
+ * session's owner. Seance hands ownership to another participant when the
+ * person's tab leaves, so a tab also checks that it created the session (kept
+ * in its sessionStorage, which survives a reload). Seance lets only writers
+ * send these frames, and it relays every answer to everyone in the session, so
+ * commands that read or change the person's private data stay out of the relay
+ * (`remote: false`).
  *
  * Images are images: an image result is uploaded to the session as its own
- * bytes, and the reply names it by its SHA-256. It is never sent as text.
+ * bytes, and the reply names it by its SHA-256. No image travels as text: a
+ * request or an answer that carries a base64 image is refused.
  *
  * The relay reads and writes the SDK's socket through the WebSocket class it
  * hands to the SDK, so the SDK itself needs no change.
@@ -42,6 +46,17 @@ const MAX_PENDING = 8
 // only after ten minutes. Agent images keep to half of that.
 const IMAGE_LIMIT = 16
 const IMAGE_WINDOW_MS = 10 * 60 * 1000
+const IMAGE_TEXT = /data:image\/[^;,"'\s]*;base64,/i
+const CREATED_KEY = 'nf-agent-relay:created'
+
+function readCreated() {
+    try {
+        const list = JSON.parse(globalThis.sessionStorage?.getItem(CREATED_KEY) || '[]')
+        return Array.isArray(list) ? list.filter(id => typeof id === 'string') : []
+    } catch {
+        return []
+    }
+}
 
 // The size Seance gives a JSON text: escapes for quotes, backslashes and
 // control characters, and six bytes for every non-ASCII UTF-16 unit.
@@ -120,7 +135,8 @@ function newTabId() {
  * @param {(command: string, args: object) => Promise<{envelope: object, image?: Blob}>} options.invoke
  * @param {(blob: Blob) => Promise<string>} options.uploadImage - Uploads bytes to the session; returns the image id.
  * @param {typeof WebSocket} [options.BaseSocket]
- * @returns {{ WebSocket: typeof WebSocket, tabId: string }}
+ * @returns {{ WebSocket: typeof WebSocket, tabId: string, sessionCreated: (sessionId: string) => void }}
+ *   Call sessionCreated with the session id once this tab has taken a session online.
  */
 export function createAgentRelay({ app, appVersion, catalog, invoke, uploadImage, BaseSocket = globalThis.WebSocket }) {
     const tabId = newTabId()
@@ -129,12 +145,23 @@ export function createAgentRelay({ app, appVersion, catalog, invoke, uploadImage
     let socket = null
     let self = null
     let owner = null
+    let session = null
     let pending = 0
+    const created = new Set(readCreated())
     let tokens = SEND_BURST
     let tokensAt = Date.now()
     let chain = Promise.resolve()
 
-    const answering = () => Boolean(self) && self === owner
+    const answering = () => Boolean(self) && self === owner && created.has(session)
+
+    function sessionCreated(sessionId) {
+        if (typeof sessionId !== 'string' || !sessionId) return
+        created.add(sessionId)
+        try {
+            globalThis.sessionStorage?.setItem(CREATED_KEY, JSON.stringify([...created].slice(-20)))
+        } catch { /* storage refused: the tab still answers until it reloads */ }
+        if (answering() && socket) send(relayFrames({ kind: 'announce', from: tabId, app }, describe()))
+    }
 
     function send(frames, target = socket) {
         const run = async () => {
@@ -196,6 +223,9 @@ export function createAgentRelay({ app, appVersion, catalog, invoke, uploadImage
             return
         } else if (typeof command !== 'string' || !command) {
             envelope = makeFailure('relay', 'INVALID_ARGS_REQUIRED', 'command is required', { field: 'command' })
+        } else if (IMAGE_TEXT.test(JSON.stringify(args ?? {}))) {
+            envelope = makeFailure(command, 'IMAGE_AS_TEXT',
+                'Images travel through a session as bytes, never as text. Add the image with image-put and refer to it as image:<sha256>.')
         } else {
             let out
             try {
@@ -204,7 +234,13 @@ export function createAgentRelay({ app, appVersion, catalog, invoke, uploadImage
                 out = { envelope: makeFailure(command, 'INTERNAL_ERROR', err?.message || String(err)) }
             }
             envelope = out.envelope
-            if (envelope.ok && out.image) envelope = await storeImage(command, envelope, out.image)
+            if (IMAGE_TEXT.test(JSON.stringify(envelope))) {
+                envelope = makeFailure(command, 'IMAGE_AS_TEXT',
+                    'The answer holds an image as text, which a session does not carry. Ask the person to share the image as a file.',
+                    {}, envelope.state)
+            } else if (envelope.ok && out.image) {
+                envelope = await storeImage(command, envelope, out.image)
+            }
         }
         await send(relayFrames({ kind: 'response', id: frame.id, from: tabId, app }, envelope), target)
     }
@@ -213,6 +249,7 @@ export function createAgentRelay({ app, appVersion, catalog, invoke, uploadImage
         if (frame.type === 'welcome') {
             self = frame.you?.user_id || null
             owner = frame.owner?.user_id || null
+            session = frame.session || null
         } else if (frame.type === 'owner-changed') {
             // The new owner travels in the envelope (Seance protocol section 4).
             owner = frame.user_id || null
@@ -262,6 +299,7 @@ export function createAgentRelay({ app, appVersion, catalog, invoke, uploadImage
             socket = this
             self = null
             owner = null
+            session = null
             this.addEventListener('message', onMessage)
             this.addEventListener('close', () => {
                 if (socket === this) socket = null
@@ -275,5 +313,5 @@ export function createAgentRelay({ app, appVersion, catalog, invoke, uploadImage
         }
     })
 
-    return { WebSocket: RelaySocket, tabId }
+    return { WebSocket: RelaySocket, tabId, sessionCreated }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
- * The two browser routes beside window.HD4Agent: WebMCP page tools
- * (hd4_<command>) and the opt-in ?agent=1 command form.
+ * WebMCP page tools (hd4_<command>): the browser route beside
+ * window.HD4Agent.
  */
 import { test, expect } from './fixtures.js'
 
@@ -12,48 +12,6 @@ async function load(page, query = '') {
     await page.waitForFunction(() => window.__hd4?.ready === true && window.HD4Agent?.setProgram, null, { timeout: 30_000 })
     await page.evaluate(() => window.HD4Agent.ready)
 }
-
-test('the command form runs validation, changes and images without page evaluation', async ({ page }) => {
-    await page.goto('/?agent=1')
-    const panel = page.getByRole('region', { name: 'HD4 agent' })
-    await expect(panel).toBeVisible({ timeout: 30_000 })
-    const command = panel.getByLabel('Command', { exact: true })
-    const args = panel.getByLabel('Arguments (JSON)', { exact: true })
-    const run = panel.getByRole('button', { name: 'Run command', exact: true })
-    const output = panel.getByLabel('Command result', { exact: true })
-    await expect(run).toBeEnabled({ timeout: 30_000 })
-    await command.selectOption('setProgram')
-    await args.fill(JSON.stringify({ dsl: RED, channel: 3 }))
-    await run.click()
-    await expect(output).toContainText('"applied": true')
-    await command.selectOption('validateProgram')
-    await args.fill(JSON.stringify({ dsl: 'search synth\nnoise(madeUp: 1).write(o0)\nrender(o0)' }))
-    await run.click()
-    await expect(output).toContainText('"valid": false')
-    await args.fill('{')
-    await run.click()
-    await expect(output).toContainText('INVALID_JSON')
-    await command.selectOption('getProgram')
-    await args.fill('')
-    // Typed key by key: c, a and the digits are mixer shortcuts outside text fields.
-    await args.pressSequentially('{"channel":3}')
-    await run.click()
-    await expect(output).toContainText('solid(color: #ff0000)')
-    expect(await page.evaluate(() => ({ type: window.__hd4.switcher.type, auto: window.__hd4.autoMix.enabled, live: window.__hd4.switcher.live })))
-        .toEqual({ type: 'mix', auto: false, live: 1 })
-    await command.selectOption('getThumbnail')
-    await args.fill('{"maxDimension":64,"format":"png","source":3}')
-    await run.click()
-    await expect(panel.getByRole('img', { name: 'Command image' })).toBeVisible()
-    await expect(output).toContainText('"width": 64')
-    await expect(output).not.toContainText('"bytes"')
-    await expect(panel.getByRole('link', { name: 'Download image' })).toHaveAttribute('href', /^blob:/)
-})
-
-test('the command form is opt-in', async ({ page }) => {
-    await load(page)
-    await expect(page.getByRole('region', { name: 'HD4 agent' })).toHaveCount(0)
-})
 
 test('WebMCP registers every command and runs the real handlers', async ({ page }) => {
     // Capture the native registration boundary in browsers without WebMCP.
@@ -99,14 +57,13 @@ test('WebMCP registers every command and runs the real handlers', async ({ page 
     expect(out.mutation).toBe(false)
 })
 
-test('an unavailable WebMCP registration does not break commands or the form', async ({ page }) => {
+test('an unavailable WebMCP registration does not break the commands', async ({ page }) => {
     await page.addInitScript(() => {
         Object.defineProperty(document, 'modelContext', { value: {
             registerTool() { return Promise.reject(new Error('registration unavailable')) },
         } })
     })
-    await load(page, '?agent=1')
+    await load(page)
     const env = await page.evaluate(() => window.HD4Agent.getState())
     expect(env.ok).toBe(true)
-    await expect(page.getByRole('region', { name: 'HD4 agent' }).getByRole('button', { name: 'Run command' })).toBeEnabled()
 })

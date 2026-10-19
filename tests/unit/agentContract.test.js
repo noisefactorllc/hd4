@@ -40,9 +40,12 @@ test('the relay keeps the shared wire protocol', async () => {
     const source = await readFile(new URL('relay.js', AGENT_DIR), 'utf8')
     assert.match(source, /export const RELAY = 'nf-agent\/1'/)
     assert.match(source, /const MAX_FRAME_BYTES = 60000\nconst MAX_SLICE_BYTES = 48000\nconst SEND_RATE = 4\nconst SEND_BURST = 8\nconst MAX_PENDING = 8\n/)
-    // Only the session owner's tab answers, and '*' reaches only describe.
-    assert.match(source, /const answering = \(\) => Boolean\(self\) && self === owner/)
+    // Only the tab that took the session online answers, while it owns the
+    // session; '*' reaches only describe; no image crosses as text.
+    assert.match(source, /const answering = \(\) => Boolean\(self\) && self === owner && created\.has\(session\)/)
     assert.match(source, /\} else if \(frame\.to !== tabId\) \{\n\s+return\n/)
+    assert.match(source, /return \{ WebSocket: RelaySocket, tabId, sessionCreated \}/)
+    assert.match(source, /'IMAGE_AS_TEXT'/)
     assert.match(source, /^import \{ API_VERSION, makeFailure, makeSuccess \} from '\.\/dispatcher\.js'$/m)
 })
 

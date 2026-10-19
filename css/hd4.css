@@ -1310,20 +1310,6 @@ body {
 }
 .hd4-user-assign:hover { background: var(--hf-bg-muted); }
 
-/* ---- Go online (Seance) ----
-   The go-online top-bar opener (.hd4-online-open) is a handfish .hf-icon-btn
-   beside the MIDI opener. Its glyph is SEANCE_LOGO_SVG, a raw SVG child rather
-   than a .hf-icon material symbol, so it takes the symbols' size here.
-   handfish's .hf-icon-btn sets display:inline-flex, which overrides the
-   hidden attribute's display:none; force it back so the button stays hidden
-   until online collaboration is wired. */
-.hd4-online-open svg {
-    width: var(--hf-size-lg);
-    height: var(--hf-size-lg);
-    fill: currentColor;
-}
-.hd4-online-open[hidden] { display: none; }
-
 /* ---- MIDI panel ----
    The MIDI top-bar opener (.hd4-midi-open) is a handfish .hf-icon-btn (piano
    glyph), styled by menus-and-toolbars.css; the class is a behaviour hook

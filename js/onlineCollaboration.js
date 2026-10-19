@@ -12,15 +12,16 @@
  * A channel change is published once its program runs. A program from the
  * session is applied to its channel like a pasted one: a program that does
  * not compile leaves the channel on its previous source, and that fallback is
- * not published back. Images a program names (image:<sha256>) travel as
- * binary uploads, never as text.
+ * not published back. Images a program names (image:<sha256>) come from the
+ * session as binary bytes and stay with it; HD4 never uploads one of its own.
  *
  * The SDK's socket also carries the agent relay (agent/relay.js), through the
- * WebSocket class the app passes in. Status reaches the person through the
- * <seance-dialog> and HD4's readout.
+ * WebSocket class of the relay the app passes in. Only a session this tab took
+ * online is marked for the relay to answer in. Status reaches the person
+ * through the <seance-dialog>; the console says why a join failed.
  */
 
-import { heldImage, programImageIds, setImageResolver } from './programImages.js'
+import { forgetImages, setImageResolver } from './programImages.js'
 
 export const DEFAULT_SEANCE_URL = 'https://seance.noisefactor.io'
 // Bypass browsers that cached the older alias without Cache-Control, and SDKs
@@ -72,19 +73,6 @@ export function refusalMessage(frame) {
     }
 }
 
-/** The readout's short form of refusalMessage(frame), or null. */
-export function refusalReadout(frame) {
-    const message = refusalMessage(frame)
-    if (!message) return null
-    return {
-        'that session has expired or does not exist': 'EXPIRED',
-        'that session belongs to a different app': 'OTHER APP',
-        'that session is full': 'FULL',
-        'that session is locked': 'LOCKED',
-        'you cannot rejoin that session': 'BANNED',
-    }[message] || 'REFUSED'
-}
-
 export async function createHD4OnlineCollaboration(options) {
     const runtimeConfig = globalThis.__HD4_SEANCE_CONFIG__ || {}
     const controller = new HD4OnlineController({
@@ -103,9 +91,8 @@ class HD4OnlineController {
         channels,
         renderers,
         applyRemoteText,
-        createSocketClass = null,
+        createAgentRelay = null,
         dialog,
-        report = () => {},
         location = globalThis.location,
         history = globalThis.history,
         clipboard = globalThis.navigator?.clipboard,
@@ -122,9 +109,9 @@ class HD4OnlineController {
         this.channels = channels
         this.renderers = renderers
         this.applyRemoteText = applyRemoteText
-        this.createSocketClass = createSocketClass
+        this.createAgentRelay = createAgentRelay
+        this.agentRelay = null
         this.dialog = dialog
-        this.report = report
         this.location = location
         this.history = history
         this.clipboard = clipboard
@@ -134,11 +121,6 @@ class HD4OnlineController {
         // The channel source last seen by syncChannels(), and whether its
         // change still waits to be published.
         this._seen = CHANNEL_NUMBERS.map((n) => ({ source: channels[n - 1].source, pending: false }))
-        // Program text whose images are uploading, per channel.
-        this._publishing = CHANNEL_NUMBERS.map(() => null)
-        // Image ids the current session holds.
-        this._uploaded = new Set()
-        this._imageSessionVersion = 0
 
         setImageResolver((id) => this.getImage(id))
         this._wireUi()
@@ -166,49 +148,16 @@ class HD4OnlineController {
 
     _publish(n, text) {
         const i = n - 1
-        if (!this.online || this._docText[i] === text || this._publishing[i] === text) return
+        if (!this.online || this._docText[i] === text) return
         const status = this.getStatus()
         if (!this.getSessionId() || status === 'offline' || status === 'readonly') return
-        this._publishing[i] = null
-        if (programImageIds(text).some((id) => !this._uploaded.has(id))) {
-            this._publishing[i] = text
-            this._publishImageText(n, text)
-            return
-        }
         this._docText[i] = text
         this.online.updateLocalText(docIdForChannel(n), text, { source: 'channel' })
     }
 
-    /**
-     * Upload the images a program names, then publish it. A newer change or
-     * session wins. An image that cannot be shared leaves its reference in the
-     * program: peers then show that media step empty, as they would offline.
-     */
-    async _publishImageText(n, text) {
-        const i = n - 1
-        const online = this.online
-        const session = this.getSessionId()
-        const imageSession = this._imageSessionVersion
-        const current = () => this._publishing[i] === text && this.online === online
-            && this.getSessionId() === session && this._imageSessionVersion === imageSession
-        for (const id of programImageIds(text)) {
-            if (this._uploaded.has(id)) continue
-            const blob = heldImage(id)
-            if (!blob) continue
-            let uploaded = false
-            try {
-                await online.uploadImage(blob)
-                uploaded = true
-            } catch (err) {
-                if (current()) this._announce(`image ${id} was not shared: ${err?.message || err}`, 'IMAGE FAILED')
-            }
-            if (!current()) return
-            if (uploaded) this._uploaded.add(id)
-        }
-        if (!current()) return
-        this._publishing[i] = null
-        this._docText[i] = text
-        online.updateLocalText(docIdForChannel(n), text, { source: 'channel' })
+    /** The text the session holds for a channel, or '' when offline. */
+    publishedText(n) {
+        return this.getSessionId() ? this._docText[n - 1] : ''
     }
 
     async _applyRemote(n, text, context) {
@@ -221,12 +170,10 @@ class HD4OnlineController {
         }
     }
 
-    /** An image of the current session, as a Blob. */
+    /** An image of the current session, as a Blob. Offline there is none. */
     async getImage(id) {
-        const online = await this._ensureOnline()
-        const blob = await online.getImage(id)
-        this._uploaded.add(id)
-        return blob
+        if (!this.online || !this.getSessionId()) throw new Error('images come from a Seance session, and this tab is offline')
+        return this.online.getImage(id)
     }
 
     async takeOnline() {
@@ -240,21 +187,16 @@ class HD4OnlineController {
             if (version !== this._actionVersion) return
             this._closeActiveSession()
             const docs = this._seedDocs()
-            const images = []
-            for (const id of new Set(docs.flatMap((doc) => programImageIds(doc.text)))) {
-                const blob = heldImage(id)
-                if (blob) images.push({ id, blob })
-            }
             this._adoptLocalState(docs)
-            await this.online.takeOnline(images.length ? { docs, images: images.map((image) => image.blob) } : docs)
+            await this.online.takeOnline(docs)
             if (version !== this._actionVersion) return
-            for (const image of images) this._uploaded.add(image.id)
+            // The relay answers agents only in a session this tab took online.
+            this.agentRelay?.sessionCreated(this.online.getSessionId())
             this._writeSessionToUrl(this.online.getSessionId())
             this.syncStatusUi()
-            this.report('ONLINE', 'READY')
         } catch (err) {
             console.error('[seance] take online failed', err)
-            if (!this._refusalAnnounced) this._announce(`online failed: ${refusalMessage(err) || err?.message || err}`, refusalReadout(err) || 'FAILED')
+            if (!this._refusalAnnounced) this._announce(`online failed: ${refusalMessage(err) || err?.message || err}`)
         } finally {
             this._actionInFlight = false
             this._setBusy(false)
@@ -275,10 +217,9 @@ class HD4OnlineController {
             await this.online.joinSession(id)
             if (writeUrl) this._writeSessionToUrl(id)
             this.syncStatusUi()
-            this.report('ONLINE', 'JOINED')
         } catch (err) {
             console.error('[seance] join failed', err)
-            if (!this._refusalAnnounced) this._announce(`join failed: ${refusalMessage(err) || err?.message || err}`, refusalReadout(err) || 'FAILED')
+            if (!this._refusalAnnounced) this._announce(`join failed: ${refusalMessage(err) || err?.message || err}`)
         } finally {
             this._actionInFlight = false
             this._setBusy(false)
@@ -296,7 +237,6 @@ class HD4OnlineController {
         this._closeActiveSession()
         this._writeSessionToUrl(null)
         this.syncStatusUi()
-        this.report('ONLINE', 'OFF')
     }
 
     getSessionId() {
@@ -326,10 +266,9 @@ class HD4OnlineController {
         this.dialog.sessionUrl = shareUrl
     }
 
-    /** Show a status: the full copy in the console, its short form on the readout. */
-    _announce(copy, readout) {
+    /** Say why something did not work; the dialog shows the state itself. */
+    _announce(copy) {
         console.warn(`[seance] ${copy}`)
-        this.report('ONLINE', readout)
     }
 
     async _ensureOnline() {
@@ -339,21 +278,21 @@ class HD4OnlineController {
         this._onlinePromise = import(this.sdkUrl)
             .then((sdk) => {
                 // The agent relay rides the SDK's own socket (agent/relay.js).
-                const SocketClass = this.createSocketClass?.({ uploadImage: (blob) => this.online.uploadImage(blob) })
+                this.agentRelay = this.createAgentRelay?.({ uploadImage: (blob) => this.online.uploadImage(blob) }) || null
                 this.online = sdk.createOnlineDslLayer({
                     seanceUrl: this.seanceUrl,
                     dialect: SESSION_DIALECT,
                     defaultDocId: docIdForChannel(1),
                     location: this.location,
                     publicAppUrl: this.location?.href,
-                    ...(SocketClass ? { WebSocket: SocketClass } : {}),
+                    ...(this.agentRelay ? { WebSocket: this.agentRelay.WebSocket } : {}),
                 })
                 this.online.on('status', () => this.syncStatusUi())
                 this.online.on('doc-reject', (info) => {
                     if (info?.reason === 'reconnect_ambiguous' || info?.reason === 'readonly_draft') {
-                        this._announce('Sync paused to protect your changes. Rejoin the session to share them again.', 'PAUSED')
+                        this._announce('Sync paused to protect your changes. Rejoin the session to share them again.')
                     } else if (info?.reason === 'missing_document') {
-                        this._announce(`${info.docId} is not part of this session; it stays local.`, 'NOT SHARED')
+                        this._announce(`${info.docId} is not part of this session; it stays local.`)
                     }
                 })
                 this.online.on('snapshot', () => this.syncStatusUi())
@@ -363,7 +302,7 @@ class HD4OnlineController {
                 this.online.on('disconnect', (info) => {
                     this._sdkReportsDisconnect = true
                     const message = refusalMessage(info) || refusalMessage(info?.error)
-                    if (message) this._announce(message, refusalReadout(info) || refusalReadout(info?.error))
+                    if (message) this._announce(message)
                     this.syncStatusUi()
                 })
                 this.online.on('error', (err) => {
@@ -377,12 +316,12 @@ class HD4OnlineController {
                         if (!this._sdkReportsDisconnect) this._closeActiveSession()
                         if (!this._refusalAnnounced) {
                             this._refusalAnnounced = true
-                            this._announce(message, refusalReadout(err))
+                            this._announce(message)
                         }
                         this.syncStatusUi()
                         return
                     }
-                    this._announce(`online: ${message || err?.message || err}`, refusalReadout(err) || 'ERROR')
+                    this._announce(`online: ${message || err?.message || err}`)
                 })
                 this._bindChannels()
                 this.syncStatusUi()
@@ -428,9 +367,8 @@ class HD4OnlineController {
             if (!url) return
             try {
                 await this.clipboard?.writeText?.(url)
-                this.report('ONLINE', 'URL COPIED')
             } catch {
-                this._announce(`online URL: ${url}`, 'COPY FAILED')
+                this._announce(`the session URL was not copied: ${url}`)
             }
         })
     }
@@ -450,7 +388,6 @@ class HD4OnlineController {
         docs.forEach((doc, i) => {
             this._docText[i] = doc.text
             this._seen[i] = { source: this.channels[i].source, pending: false }
-            this._publishing[i] = null
         })
     }
 
@@ -475,9 +412,7 @@ class HD4OnlineController {
     }
 
     _closeActiveSession() {
-        this._imageSessionVersion++
-        this._uploaded.clear()
-        this._publishing = CHANNEL_NUMBERS.map(() => null)
+        forgetImages()
         if (!this.online) return
         if (this.online.getStatus?.() === 'offline' && !this.online.getSessionId?.()) return
         this.online.goOffline?.()

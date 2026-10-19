@@ -4,9 +4,9 @@
  * agents that control HD4. The contract's source is llms.txt at the site
  * root. llms-full.txt adds the command reference.
  *
- * The same commands reach an agent three more ways: WebMCP page tools
- * (`hd4_<command>`), the opt-in `?agent=1` command form, and the Seance relay
- * that answers an agent in the person's online session.
+ * The same commands reach an agent two more ways: WebMCP page tools
+ * (`hd4_<command>`), and the Seance relay that answers an agent in the
+ * session this tab took online.
  *
  * @module agent
  */
@@ -15,7 +15,6 @@ import { API_VERSION, makeFailure, registerCommand, runCommand } from './dispatc
 import { SCHEMAS } from './schemas.js'
 import * as commands from './commands.js'
 import { catalog, registerWebMCP, REMOTE } from './transports.js'
-import { mountAgentConsole } from './console.js'
 import { createAgentRelay } from './relay.js'
 
 let _readyResolve
@@ -41,7 +40,6 @@ export function bootstrapAgent(ctx) {
         registerCommand(HD4Agent, name, commands[name])
     }
     registerWebMCP(HD4Agent)
-    if (new URLSearchParams(location.search).get('agent') === '1') mountAgentConsole(HD4Agent)
 }
 
 /**
@@ -59,13 +57,14 @@ function unavailable(command) {
 }
 
 /**
- * The WebSocket class for the Seance SDK. Through it this tab answers agent
- * commands that arrive in the person's online session (see relay.js).
+ * The Seance relay for this tab (see relay.js): its WebSocket class goes to the
+ * Seance SDK, and sessionCreated marks a session this tab took online. Commands
+ * run with `remote: true`, so they show only what the session may see.
  *
  * @param {{appVersion: string, uploadImage: (blob: Blob) => Promise<string>}} options
- * @returns {typeof WebSocket}
+ * @returns {{ WebSocket: typeof WebSocket, sessionCreated: (sessionId: string) => void }}
  */
-export function createSeanceAgentSocket({ appVersion, uploadImage }) {
+export function createSeanceAgentRelay({ appVersion, uploadImage }) {
     return createAgentRelay({
         app: 'hd4',
         appVersion,
@@ -74,7 +73,7 @@ export function createSeanceAgentSocket({ appVersion, uploadImage }) {
         async invoke(command, args) {
             if (!REMOTE.has(command)) return { envelope: unavailable(command) }
             await HD4Agent.ready
-            return runCommand(command, args)
+            return runCommand(command, args, { remote: true })
         },
-    }).WebSocket
+    })
 }

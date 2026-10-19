@@ -71,8 +71,8 @@ export function joinSession(server, sessionId, { origin = PAGE_ORIGIN } = {}) {
         docText: (id) => docs.get(id)?.text,
 
         /** Ask every tab to describe itself ('*' reaches only describe); remember the owner's tab. */
-        async describe() {
-            const reply = await agent.call('describe', {}, { to: '*' })
+        async describe({ timeoutMs } = {}) {
+            const reply = await agent.call('describe', {}, { to: '*', timeoutMs })
             agent.tab = reply.from
             return reply
         },

@@ -13,11 +13,16 @@
  * Channels are numbered 1 to 4. A command that takes an optional `channel`
  * acts on the PVW (preview) channel when it is omitted.
  *
+ * A command that came through a Seance session gets `{ remote: true }` as its
+ * third argument. It then shows only what the session may see: programs as the
+ * session holds them, local sources by their kind, and no image while a
+ * camera, a video, an image file or a still feeds the mix.
+ *
  * @module agent/commands
  */
 
 import { commandError } from './dispatcher.js'
-import { buildSnapshot, channelSummary } from './snapshot.js'
+import { agentView, buildSnapshot, channelProgram, channelSummary, isLocalMedia } from './snapshot.js'
 import { compile as compileDsl, getEffect } from '../noisemaker/bundle.js'
 import { stripMediaUrls } from '../programImages.js'
 import { listCameras } from '../sources/cameras.js'
@@ -51,19 +56,19 @@ function sourceOutcome(outcome, channel, what) {
     }]
 }
 
-export async function getState(_args, ctx) {
-    return { result: buildSnapshot(ctx) }
+export async function getState(_args, ctx, options) {
+    return { result: buildSnapshot(ctx, options) }
 }
 
-export async function getProgram({ channel }, ctx) {
+export async function getProgram({ channel }, ctx, options) {
     const n = channelOrPreview(channel, ctx)
-    const summary = channelSummary(ctx.channels[n - 1], ctx.renderers[n - 1], n)
-    const source = ctx.channels[n - 1].source
+    const view = agentView(ctx, options)
+    const summary = channelSummary(ctx.channels[n - 1], ctx.renderers[n - 1], n, view)
     return {
         result: {
             channel: n,
             source: summary.source,
-            dsl: source?.type === 'shader' ? String(source.dsl || '') : '',
+            dsl: channelProgram(ctx.channels[n - 1], n, view),
             running: summary.running,
         },
     }
@@ -74,7 +79,7 @@ function keySource(sourceCh) {
     return sourceCh >= 1 && sourceCh <= 4 ? sourceCh : null
 }
 
-export async function getControls({ section }, ctx) {
+export async function getControls({ section }, ctx, options) {
     const { channels, renderers, autoMix, audio, composition, beatClock, controls } = ctx
     switch (section) {
         case 'channels':
@@ -82,7 +87,7 @@ export async function getControls({ section }, ctx) {
                 result: {
                     section,
                     channels: channels.map((channel, i) => ({
-                        ...channelSummary(channel, renderers[i], i + 1),
+                        ...channelSummary(channel, renderers[i], i + 1, agentView(ctx, options)),
                         fit: renderers[i].fitMode,
                         autoInclude: autoMix.isIncluded(i + 1),
                     })),
@@ -258,7 +263,7 @@ export async function getEffectDefinition({ effectId }, ctx) {
     }
 }
 
-export async function setSource({ channel, source }, ctx) {
+export async function setSource({ channel, source }, ctx, options) {
     const n = channelOrPreview(channel, ctx)
     if (source === 'still') {
         const outcome = await ctx.controls.setChannelStill(n)
@@ -269,7 +274,7 @@ export async function setSource({ channel, source }, ctx) {
     } else {
         sourceOutcome(await ctx.controls.setChannelLibrary(n, source), n, source)
     }
-    const summary = channelSummary(ctx.channels[n - 1], ctx.renderers[n - 1], n)
+    const summary = channelSummary(ctx.channels[n - 1], ctx.renderers[n - 1], n, agentView(ctx, options))
     return { result: { channel: n, source: summary.source, name: summary.name } }
 }
 
@@ -404,9 +409,20 @@ export async function setUserButton({ button, action }, ctx) {
     return { result: { button, action: ctx.userButtons.get(button - 1) || 'none' } }
 }
 
+// Through a session an image may show only what the session carries. A
+// camera, a video, an image file or a still never enters it, and FREEZE can
+// hold a frame of one, so while any of them feeds the mix there is no image.
+function privateInput({ channels, composition, output }) {
+    const n = channels.findIndex(channel => isLocalMedia(channel.source))
+    if (n >= 0) return `channel ${n + 1} shows a ${channels[n].source.type}`
+    if (composition.key.on && composition.key.sourceCh === 5) return 'the KEY shows the still'
+    if (output.freeze) return 'FREEZE holds a frame'
+    return null
+}
+
 // The program canvas is drawn on each animation frame. Two frames make sure
 // a change made just before shows; a hidden tab gets no frames, so the wait
-// is bounded and the last drawn frame is used.
+// is bounded and the last drawn frame is used. Waiting draws nothing itself.
 function nextFrames() {
     return Promise.race([
         new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -414,9 +430,15 @@ function nextFrames() {
     ])
 }
 
-export async function getThumbnail({ maxDimension = 256, format = 'jpg', source = 'program' }, ctx) {
+export async function getThumbnail({ maxDimension = 256, format = 'jpg', source = 'program' }, ctx, options = {}) {
     const channel = source === 'program' ? null : source === 'preview' ? ctx.preview.preview : source
     await nextFrames()
+    const hidden = options.remote && privateInput(ctx)
+    if (hidden) {
+        throw commandError('REMOTE_UNAVAILABLE',
+            `Images are not available through a session while ${hidden}: cameras, video, image files and stills stay on the person's computer.`,
+            { reason: hidden })
+    }
     const live = channel ? ctx.channels[channel - 1].canvas : ctx.programCanvas
     const scale = Math.min(1, maxDimension / Math.max(live.width, live.height, 1))
     const out = document.createElement('canvas')

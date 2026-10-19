@@ -5,17 +5,20 @@
  * media sources), and a categorized source picker: live cameras (one per
  * device), video/image files, a program pasted from the clipboard, and the
  * pattern/fill library. The picker reports the user's choice via
- * onSelectSource; the app applies it.
+ * onSelectSource; the app applies it. With canGoOnline, the Program group
+ * ends with Go online…, which opens online collaboration (Seance) for the
+ * channel programs; like Paste program it is an action, not a source.
  */
 import { SOURCE_LIBRARY, presetByDsl } from '../sources/presets.js'
 import { isStillId, sourceKind } from '../sources/sourceModel.js'
 
 export function buildMultiview(container, channels, {
-    onSelectSource, onSetFit, getFit, onSetAutoInclude, getAutoInclude, cameras = [],
+    onSelectSource, onSetFit, getFit, onSetAutoInclude, getAutoInclude, cameras = [], canGoOnline = false,
 } = {}) {
     container.innerHTML = ''
     const tiles = channels.map((ch, i) => buildTile(ch, i, {
         onSelectSource,
+        canGoOnline,
         onSetFit,
         initialFit: getFit ? getFit(i) : 'cover',
         onSetAutoInclude,
@@ -46,7 +49,7 @@ export function buildMultiview(container, channels, {
     }
 }
 
-function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSetAutoInclude, initialInclude }) {
+function buildTile(channel, index, { onSelectSource, canGoOnline, onSetFit, initialFit, onSetAutoInclude, initialInclude }) {
     const el = document.createElement('div')
     el.className = 'hd4-monitor'
     el.dataset.channel = String(channel.id)
@@ -70,7 +73,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
 
     const auto = buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude)
     const fit = buildFitToggle(index, onSetFit, initialFit)
-    const picker = buildSourcePicker(index, onSelectSource)
+    const picker = buildSourcePicker(index, onSelectSource, { canGoOnline })
     picker.sync(channel.source)
 
     bar.append(num, label, auto.el, fit.el, picker.control)
@@ -89,7 +92,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
 }
 
 /** Categorized source picker: cameras (per device) / files / capture / program / library. */
-function buildSourcePicker(index, onSelectSource) {
+function buildSourcePicker(index, onSelectSource, { canGoOnline = false } = {}) {
     const select = document.createElement('select')
     select.className = 'hd4-source-select'
     select.setAttribute('aria-label', `Channel ${index + 1} source`)
@@ -118,6 +121,14 @@ function buildSourcePicker(index, onSelectSource) {
     pasteOption.value = 'paste'
     pasteOption.textContent = 'Paste program'
     programGroup.appendChild(pasteOption)
+    // Go online… stays last in the group: Custom is inserted before it.
+    let onlineOption = null
+    if (canGoOnline) {
+        onlineOption = document.createElement('option')
+        onlineOption.value = 'online'
+        onlineOption.textContent = 'Go online…'
+        programGroup.appendChild(onlineOption)
+    }
 
     select.append(camGroup, fileGroup, captureGroup, programGroup)
     for (const cat of SOURCE_LIBRARY) {
@@ -157,6 +168,8 @@ function buildSourcePicker(index, onSelectSource) {
             onSelectSource?.(index, { type: 'still' })
         } else if (v === 'paste') {
             onSelectSource?.(index, { type: 'paste' })
+        } else if (v === 'online') {
+            onSelectSource?.(index, { type: 'online' })
         } else if (v.startsWith('shader:')) {
             onSelectSource?.(index, { type: 'shader', name: v.slice(7) })
         }
@@ -199,7 +212,7 @@ function buildSourcePicker(index, onSelectSource) {
             const o = document.createElement('option')
             o.value = 'custom'
             o.textContent = 'Custom'
-            programGroup.appendChild(o)
+            programGroup.insertBefore(o, onlineOption)
         } else if (!on && custom) {
             custom.remove()
         }

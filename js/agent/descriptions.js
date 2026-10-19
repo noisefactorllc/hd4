@@ -25,7 +25,7 @@ export const COMMAND_GROUPS = [
                 returns: 'the snapshot',
             },
             getProgram: {
-                does: 'Returns the program text of one channel and whether it is the program that runs. A channel that shows a camera, a video, an image or nothing has no program text. `channel` defaults to the PVW channel.',
+                does: 'Returns the program text of one channel and whether it is the program that runs. A channel that shows a camera, a video, an image or nothing has no program text. Through a Seance session it is the text the session holds for the channel. `channel` defaults to the PVW channel.',
                 returns: '`{ channel, source, dsl, running }`, where `source` is `shader`, `camera`, `video`, `image` or `none`',
             },
             getControls: {
@@ -203,7 +203,7 @@ export const COMMAND_GROUPS = [
         title: 'Images',
         commands: {
             getThumbnail: {
-                does: 'Returns an image of the program output (`program`), of the PVW channel (`preview`) or of channel 1 to 4. Through a Seance session the image is added to the session as its own bytes, and `image` replaces `bytes`.',
+                does: 'Returns an image of the program output (`program`), of the PVW channel (`preview`) or of channel 1 to 4. Through a Seance session the image is added to the session as its own bytes, and `image` replaces `bytes`; there it answers REMOTE_UNAVAILABLE while a camera, a video, an image file or a still feeds any channel or the KEY, or FREEZE holds a frame, because those stay on the person\'s computer.',
                 returns: '`{ bytes, mimeType, width, height, source, channel }`, with `bytes` in base64 and `channel` the channel shown (`null` for the program output). Through a session: `{ image: { id, mimeType, bytes }, mimeType, width, height, source, channel }`, where `image.bytes` is the byte count',
             },
         },

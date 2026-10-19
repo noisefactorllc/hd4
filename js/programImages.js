@@ -7,9 +7,10 @@
  * The engine's media() has no `url` argument. HD4 removes it before it
  * compiles a program (and before it diagnoses one), then binds each named
  * image as its media step's texture. Images are images: they are Blobs named
- * by the SHA-256 of their bytes, never text. While HD4 is online they come
- * from the Seance session (setImageResolver); each one stays in memory for
- * the page, so a recompile and the next session can still find it.
+ * by the SHA-256 of their bytes, never text. They come only from the Seance
+ * session this tab is in (setImageResolver), and HD4 keeps them for that
+ * session alone (forgetImages), so no image of the person's crosses into
+ * another session. Offline, a program's image steps stay empty.
  */
 
 // media( ... ) with at most one level of nested parentheses in its arguments.
@@ -48,17 +49,12 @@ export function setImageResolver(fn) {
     resolver = typeof fn === 'function' ? fn : null
 }
 
-/** Keep an image's bytes for the page. */
-export function rememberImage(id, blob) {
-    if (IMAGE_URL.test(`image:${id}`) && blob instanceof Blob) images.set(id, blob)
+/** Drop every image kept for the session that just ended. */
+export function forgetImages() {
+    images.clear()
 }
 
-/** An image this page holds, or null. */
-export function heldImage(id) {
-    return images.get(id) || null
-}
-
-/** An image's bytes: from this page's memory, else from the resolver. */
+/** An image's bytes: kept from this session, else from the resolver. */
 export async function resolveImage(id) {
     const held = images.get(id)
     if (held) return held
