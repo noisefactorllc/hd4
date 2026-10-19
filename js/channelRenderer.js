@@ -88,9 +88,11 @@ export class ChannelRenderer {
         try {
             await this._loadEffectsFor(dsl)
             if (superseded()) return { success: false, superseded: true }
-            const turn = this._engineTurn.then(() => (superseded() ? null : this._renderer.compile(dsl)))
+            // The limit counts from this turn's start, not from when it queued.
+            const prior = this._engineTurn
             let timer
-            const limit = new Promise((resolve) => { timer = setTimeout(resolve, ENGINE_TURN_LIMIT_MS) })
+            const limit = prior.then(() => new Promise((resolve) => { timer = setTimeout(resolve, ENGINE_TURN_LIMIT_MS) }))
+            const turn = prior.then(() => (superseded() ? null : this._renderer.compile(dsl)))
             const settled = turn
                 .catch(() => { /* the compile reports its own error below */ })
                 .finally(() => clearTimeout(timer))
