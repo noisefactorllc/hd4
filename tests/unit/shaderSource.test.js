@@ -36,6 +36,11 @@ test('start rejects with the compile error when the program fails', async () => 
     await assert.rejects(makeShaderDriver({ dsl: BAD }, renderer).start(), /Unknown effect: 'notAnEffect'/)
 })
 
+test('a compile a newer one overtook resolves without failing', async () => {
+    const renderer = { compile: async () => ({ success: false, superseded: true }) }
+    assert.deepEqual(await makeShaderDriver({ dsl: GOOD }, renderer).start(), { success: false, superseded: true })
+})
+
 test('a channel given a program that fails falls back to its previous source', async () => {
     const renderer = fakeRenderer()
     const channel = new Channel({ id: 3, canvas: {}, driverFactory: (source) => makeShaderDriver(source, renderer) })

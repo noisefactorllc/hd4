@@ -11,6 +11,9 @@ import { test, expect } from './fixtures.js'
 const MAGENTA = 'search synth\nsolid(color: #ff00ff).write(o0)\nrender(o0)'
 const CYAN = 'search synth\nsolid(color: #00ffff).write(o0)\nrender(o0)'
 const UNKNOWN_EFFECT = 'search synth\nnotAnEffect().write(o0)\nrender(o0)'
+// Its effects are not loaded at boot, so a paste downloads them.
+const NOISE = 'search synth, filter\nnoise(seed: 3).bloom().write(o0)\nrender(o0)'
+const GRID = 'search synth\ntestPattern(pattern: gridLines).write(o0)\nrender(o0)'
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 const picker = (n) => `.hd4-monitor[data-channel="${n}"] .hd4-source-select`
@@ -41,6 +44,24 @@ async function pasteKeys(page, text) {
     await page.evaluate((t) => navigator.clipboard.writeText(t), text)
     await page.evaluate(() => document.activeElement?.blur?.())
     await page.keyboard.press('ControlOrMeta+v')
+}
+
+/**
+ * Hold one effect's download until release(). hit resolves when the request
+ * arrives; loaded resolves once its response is through. Routing turns off
+ * the HTTP cache, so the request is made even when it was cached.
+ */
+async function holdEffect(page, path) {
+    let release, hitResolve
+    const released = new Promise((r) => { release = r })
+    const hit = new Promise((r) => { hitResolve = r })
+    await page.route(`**/effects/${path}.js`, async (route) => {
+        hitResolve()
+        await released
+        await route.continue()
+    })
+    const loaded = page.waitForResponse(`**/effects/${path}.js`)
+    return { hit, release, loaded }
 }
 
 const lastReadout = (page) => page.evaluate(() => window.__ledLog.at(-1) || '')
@@ -89,16 +110,91 @@ test('an empty clipboard says so and changes nothing', async ({ page }) => {
     expect(await page.evaluate(() => window.__hd4.channels[1].source.name)).toBe('Test Card')
 })
 
-test('a program that fails to compile falls back to the channel\'s previous source', async ({ page }) => {
+test('a program whose effects are not loaded yet downloads them and goes on the channel', async ({ page }) => {
+    await pasteKeys(page, NOISE)
+    await expect.poll(() => lastReadout(page), { timeout: 15_000 }).toBe('PASTE CH 2')
+    expect(await page.evaluate(() => window.__hd4.channels[1].source.dsl)).toBe(NOISE)
+    expect(await page.evaluate(() => window.__hd4.renderers[1].currentDsl)).toBe(NOISE)
+})
+
+test('a program that does not compile never touches the channel, so a running source is not restarted', async ({ page }) => {
+    // PVW ch2 shows the test card image: its driver must survive the bad paste.
+    await page.evaluate(() => { window.__driverBefore = window.__hd4.channels[1].driver })
+    await pasteKeys(page, UNKNOWN_EFFECT)
+    await expect.poll(() => lastReadout(page)).toBe('PASTE INVALID')
+    expect(await page.evaluate(() => window.__hd4.channels[1].driver === window.__driverBefore)).toBe(true)
+    expect(await page.evaluate(() => window.__hd4.channels[1].source.name)).toBe('Test Card')
+    expect(await page.locator(picker(2)).evaluate((el) => el.value)).toBe('image')
+
+    // The same holds over a pasted program: it keeps running, still Custom.
     await pasteKeys(page, MAGENTA)
     await expect.poll(() => lastReadout(page)).toBe('PASTE CH 2')
     await expect.poll(async () => dist(await channelAvg(page, 1), [255, 0, 255]), { timeout: 15_000 }).toBeLessThan(20)
-
     await pasteKeys(page, UNKNOWN_EFFECT)
     await expect.poll(() => lastReadout(page)).toBe('PASTE INVALID')
     expect(await page.evaluate(() => window.__hd4.channels[1].source.dsl)).toBe(MAGENTA)
     expect(await page.locator(picker(2)).evaluate((el) => el.value)).toBe('custom')
     await expect.poll(async () => dist(await channelAvg(page, 1), [255, 0, 255]), { timeout: 15_000 }).toBeLessThan(20)
+})
+
+test('a choice made while a pasted program\'s effects download wins', async ({ page }) => {
+    const held = await holdEffect(page, 'synth/noise')
+    await pasteKeys(page, NOISE)
+    await held.hit
+    await page.selectOption(picker(2), 'shader:Grid')
+    await page.waitForFunction(() => window.__hd4.channels[1].label === 'Grid', null, { timeout: 15_000 })
+
+    held.release()
+    await held.loaded
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 500)))
+    expect(await page.evaluate(() => window.__hd4.channels[1].label)).toBe('Grid')
+    expect(await page.evaluate(() => window.__hd4.renderers[1].currentDsl)).toBe(GRID)
+    expect(await page.evaluate(() => window.__ledLog.filter((l) => l.startsWith('PASTE')))).toEqual([])
+})
+
+test('a recalled program still downloading its effects never overrides a newer choice', async ({ page }) => {
+    await pasteKeys(page, NOISE)
+    await expect.poll(() => lastReadout(page), { timeout: 15_000 }).toBe('PASTE CH 2')
+    await page.click('.hd4-mem-save')
+    await page.click('.hd4-mem-slot[data-slot="1"]')
+    await expect(page.locator('.hd4-mem-slot[data-slot="1"]')).toHaveClass(/is-occupied/)
+
+    // A fresh page has not loaded noise; hold it while the recall compiles.
+    const held = await holdEffect(page, 'synth/noise')
+    await page.reload()
+    await page.waitForFunction(() => window.__hd4?.ready === true, null, { timeout: 30_000 })
+    await page.click('.hd4-mem-slot[data-slot="1"]')
+    await held.hit
+    await page.selectOption(picker(2), 'shader:Grid')
+    await page.waitForFunction(() => window.__hd4.renderers[1].currentDsl === 'search synth\ntestPattern(pattern: gridLines).write(o0)\nrender(o0)', null, { timeout: 15_000 })
+
+    held.release()
+    await held.loaded
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 500)))
+    expect(await page.evaluate(() => window.__hd4.channels[1].label)).toBe('Grid')
+    expect(await page.evaluate(() => window.__hd4.renderers[1].currentDsl)).toBe(GRID)
+})
+
+test('a recalled program that no longer compiles falls back, and the picker follows', async ({ page }) => {
+    await pasteKeys(page, MAGENTA)
+    await expect.poll(() => lastReadout(page)).toBe('PASTE CH 2')
+    await page.click('.hd4-mem-save')
+    await page.click('.hd4-mem-slot[data-slot="1"]')
+    await expect(page.locator('.hd4-mem-slot[data-slot="1"]')).toHaveClass(/is-occupied/)
+    // The slot's program stops compiling (say, an effect was renamed since).
+    await page.evaluate((dsl) => {
+        const slot = JSON.parse(localStorage.getItem('hd4.memory.1'))
+        slot.channels[1].dsl = dsl
+        localStorage.setItem('hd4.memory.1', JSON.stringify(slot))
+    }, UNKNOWN_EFFECT)
+
+    await page.selectOption(picker(2), 'shader:Grid')
+    await page.waitForFunction(() => window.__hd4.channels[1].label === 'Grid', null, { timeout: 15_000 })
+    await page.click('.hd4-mem-slot[data-slot="1"]')
+
+    await expect.poll(() => page.locator(picker(2)).evaluate((el) => el.value), { timeout: 15_000 }).toBe('shader:Grid')
+    expect(await page.evaluate(() => window.__hd4.channels[1].label)).toBe('Grid')
+    await expect(page.locator(`${picker(2)} option[value="custom"]`)).toHaveCount(0)
 })
 
 test('Paste program in a picker loads the clipboard into that channel', async ({ page }) => {
@@ -114,6 +210,19 @@ test('Paste program in a picker loads the clipboard into that channel', async ({
     await page.selectOption(picker(3), 'shader:Grid')
     await page.waitForFunction(() => window.__hd4.channels[2].label === 'Grid', null, { timeout: 15_000 })
     await expect(page.locator(`${picker(3)} option[value="custom"]`)).toHaveCount(0)
+})
+
+test('Paste program with the clipboard refused reports DENIED and re-syncs the picker', async ({ page }) => {
+    await page.evaluate(() => {
+        Object.defineProperty(navigator.clipboard, 'readText', {
+            value: () => Promise.reject(new DOMException('Read permission denied.', 'NotAllowedError')),
+            configurable: true,
+        })
+    })
+    await page.selectOption(picker(3), 'paste')
+    await expect.poll(() => lastReadout(page)).toBe('PASTE DENIED')
+    expect(await page.evaluate(() => window.__hd4.channels[2].label)).toBe('Color Bars')
+    expect(await page.locator(picker(3)).evaluate((el) => el.value)).toBe('shader:Color Bars')
 })
 
 test('Paste program with text that is not a program re-syncs the picker', async ({ page }) => {

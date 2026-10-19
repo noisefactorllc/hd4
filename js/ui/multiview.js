@@ -223,7 +223,8 @@ export function isCustomProgram(source) {
  * Reflect the channel's actual source in the picker where we can. An image
  * the channel shows as a captured still (it names one by id) selects the
  * Still capture option; an image loaded from a file selects Image file….
- * A pasted program selects Custom.
+ * A pasted program selects Custom. An empty channel selects nothing, so
+ * any choice made on it fires a change.
  * Exported for the unit suite: the selection mapping is pure.
  */
 export function setSelectValue(select, source) {
@@ -237,6 +238,8 @@ export function setSelectValue(select, source) {
         select.value = (source.deviceId && has(byDevice)) ? byDevice : 'camera'
     } else if (source?.type === 'video' || source?.type === 'image') {
         select.value = (source.type === 'image' && isStillId(source.stillId)) ? 'still' : source.type
+    } else if (sourceKind(source) === 'empty') {
+        select.selectedIndex = -1
     }
     // The picker is width-constrained; surface the full choice on hover.
     select.title = select.selectedOptions[0]?.textContent || ''

@@ -203,8 +203,13 @@ export function captureSnapshot({ channels, switcher, output, compositor, audio,
     }
 }
 
+/**
+ * Apply a snapshot to the live modules. Returns a promise that resolves once
+ * every recalled channel source has started or fallen back; it never rejects.
+ */
 export function applySnapshot(snap, { channels, switcher, output, compositor, audio, renderers, preview }) {
-    if (!snap) return
+    if (!snap) return Promise.resolve()
+    const restores = []
     if (Array.isArray(snap.channels)) {
         // A restore whose driver fails to start (a denied camera in a
         // recalled slot) falls back on the channel itself; swallow the
@@ -212,7 +217,7 @@ export function applySnapshot(snap, { channels, switcher, output, compositor, au
         snap.channels.forEach((src, i) => {
             const restored = channels[i]?.restore(src)
             if (restored && typeof restored.catch === 'function') {
-                restored.catch((e) => console.warn(`[hd4] channel ${i + 1} source was not recalled`, e?.message || e))
+                restores.push(restored.catch((e) => console.warn(`[hd4] channel ${i + 1} source was not recalled`, e?.message || e)))
             }
         })
     }
@@ -243,4 +248,5 @@ export function applySnapshot(snap, { channels, switcher, output, compositor, au
         if (typeof snap.audio.main === 'number') audio.setMainFader(snap.audio.main)
         if (snap.audio.mainBus && audio.setMainParams) audio.setMainParams(snap.audio.mainBus)
     }
+    return Promise.all(restores)
 }

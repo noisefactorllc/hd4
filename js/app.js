@@ -41,7 +41,7 @@ import { Recorder, recordingFilename } from './recorder.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
-import { attachProgramPaste, pastedSource } from './programPaste.js'
+import { attachProgramPaste, createProgramPaste } from './programPaste.js'
 import { BeatClock } from './beatClock.js'
 import { AutoMix } from './autoMix.js'
 import { pickLoudest } from './audio/autoAudio.js'
@@ -415,7 +415,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // --- Multiview (source monitors) ---
     const multiview = buildMultiview(byId('hd4-sources'), state.channels, {
         onSelectSource: (index, choice) => {
-            if (choice.type === 'paste') return pasteFromClipboard(index)
+            if (choice.type === 'paste') return programPaste.pasteFromClipboard(index)
             // The rejection handler covers only the application itself (the
             // channel has already fallen back to its previous source via
             // Channel.setSource): warn and re-sync the picker, which still
@@ -590,7 +590,13 @@ async function bootInto({ container = null, audioContext = null, destination = n
         save.then(() => { if (saving === save) saving = null })
     }
     const recallMemory = (slot) => {
-        const recall = () => { applySnapshot(memory.load(slot), modules); refreshAfterRecall() }
+        const recall = () => {
+            const settled = applySnapshot(memory.load(slot), modules)
+            refreshAfterRecall()
+            // A recalled source that cannot start falls back on its channel
+            // afterwards; re-sync the pickers once every source has settled.
+            settled.then(() => multiview.refresh())
+        }
         if (saving) saving.then(recall)
         else recall()
     }
@@ -631,39 +637,19 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // Cmd/Ctrl+V loads it into the PVW channel, to check on preview before
     // TAKE; a picker's Paste program loads it into that channel. Text that is
     // not a program, or a program that fails to compile, leaves the channel
-    // on what it was showing.
-    async function pasteProgram(index, text) {
-        const pasted = pastedSource(text, compile)
-        if (pasted.error) {
-            if (pasted.message) console.warn('[hd4] the clipboard holds no program:', pasted.message)
-            showParam('PASTE', pasted.error === 'empty' ? 'EMPTY' : 'INVALID')
-            multiview.refresh()
-            return
-        }
-        try {
-            await state.channels[index].setSource(pasted.source)
-            showParam('PASTE', `CH ${index + 1}`)
-        } catch (e) {
-            console.warn(`[hd4] channel ${index + 1} pasted program was not applied`, e?.message || e)
-            showParam('PASTE', 'INVALID')
-        }
-        multiview.refresh()
-    }
-    async function pasteFromClipboard(index) {
-        let text
-        try {
-            text = await navigator.clipboard.readText()
-        } catch (e) {
-            console.warn('[hd4] the clipboard was not read', e?.message || e)
-            showParam('PASTE', 'DENIED')
-            multiview.refresh()
-            return
-        }
-        await pasteProgram(index, text)
-    }
+    // on what it was showing. In the rack, HD4 takes only the pastes made
+    // inside its own panel, never the host page's.
+    const programPaste = createProgramPaste({
+        channels: state.channels,
+        renderers: state.renderers,
+        parse: compile,
+        report: (value) => showParam('PASTE', value),
+        refresh: () => multiview.refresh(),
+        clipboard: navigator.clipboard,
+    })
     const detachProgramPaste = attachProgramPaste(
-        (text) => { pasteProgram(previewBus.preview - 1, text) },
-        document,
+        (text) => { programPaste.paste(previewBus.preview - 1, text) },
+        container || document,
         { isSuspended: overlayOpen },
     )
 

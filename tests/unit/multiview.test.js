@@ -90,3 +90,11 @@ test('only a shader that is no library entry is a custom program', () => {
     assert.equal(isCustomProgram(createSource('camera')), false)
     assert.equal(isCustomProgram(null), false)
 })
+
+test('an empty channel selects nothing, so any choice fires a change', () => {
+    const select = fakeSelect([...PICKER, 'paste'])
+    select.value = 'paste'
+    select.selectedIndex = 7
+    setSelectValue(select, createSource('none'))
+    assert.equal(select.selectedIndex, -1)
+})

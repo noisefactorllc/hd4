@@ -15,6 +15,7 @@
 import {
     CanvasRenderer,
     CDN_BASE,
+    compile as compileDsl,
     extractEffectNamesFromDsl,
     extractEffectsFromDsl,
 } from './noisemaker/bundle.js'
@@ -44,6 +45,7 @@ export class ChannelRenderer {
         })
 
         this._initialized = false
+        this._compileSeq = 0 // the newest compile; an older one that finishes late is dropped
         this._currentDsl = ''
         this._mediaStep = null
         this._lastSize = null
@@ -66,15 +68,20 @@ export class ChannelRenderer {
     /**
      * Compile and run a DSL program. Loads any effects the DSL references
      * first. Keeps the previous program running on error and surfaces the
-     * message via onError.
+     * message via onError. A compile that a newer one overtook while it
+     * waited (effects can take seconds to download) is dropped, resolving
+     * { success: false, superseded: true }, so it never replaces the newer
+     * program on screen.
      */
     async compile(dsl) {
+        const seq = ++this._compileSeq
+        const superseded = () => seq !== this._compileSeq
         if (!this._initialized) await this.init()
         try {
-            const ids = extractEffectNamesFromDsl(dsl, this._renderer.manifest || {})
-                .map((e) => e.effectId)
-            if (ids.length) await this._renderer.loadEffects(ids)
+            await this._loadEffectsFor(dsl)
+            if (superseded()) return { success: false, superseded: true }
             await this._renderer.compile(dsl)
+            if (superseded()) return { success: false, superseded: true }
             this._currentDsl = dsl
             this._mediaStep = this._discoverMediaStep(dsl)
             this._lastSize = null
@@ -85,6 +92,25 @@ export class ChannelRenderer {
             this.onError(msg)
             return { success: false, error: msg }
         }
+    }
+
+    /**
+     * Check a program without running it: load the effects it names, then
+     * return the engine compiler's first error, or null. The running
+     * program is untouched, so a bad program is caught before a channel
+     * gives up its source. Throws if the effects fail to load.
+     */
+    async check(dsl) {
+        if (!this._initialized) await this.init()
+        await this._loadEffectsFor(dsl)
+        const error = (compileDsl(dsl).diagnostics || []).find((d) => d.severity === 'error')
+        return error ? error.message : null
+    }
+
+    async _loadEffectsFor(dsl) {
+        const ids = extractEffectNamesFromDsl(dsl, this._renderer.manifest || {})
+            .map((e) => e.effectId)
+        if (ids.length) await this._renderer.loadEffects(ids)
     }
 
     /** Does the current program contain a media() input? */

@@ -1,13 +1,24 @@
 // SPDX-License-Identifier: MIT
 /**
  * Program paste — clipboard text → a channel's shader source (pastedSource),
- * and the guard that decides whether a paste event loads a program
- * (attachProgramPaste).
+ * the flow that checks a program before a channel gives up its source
+ * (createProgramPaste), and the guard that decides whether a paste event
+ * loads a program (attachProgramPaste).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CUSTOM_PROGRAM_NAME, attachProgramPaste, isTextEntry, pastedSource } from '../../js/programPaste.js'
+import {
+    CUSTOM_PROGRAM_NAME,
+    MAX_PROGRAM_LENGTH,
+    attachProgramPaste,
+    createProgramPaste,
+    isTextEntry,
+    pastedSource,
+} from '../../js/programPaste.js'
 import { presetByName } from '../../js/sources/presets.js'
+import { Channel } from '../../js/channel.js'
+import { createSource } from '../../js/sources/sourceModel.js'
+import { makeShaderDriver } from '../../js/sources/shaderSource.js'
 
 const MAGENTA = 'search synth\nsolid(color: #ff00ff).write(o0)\nrender(o0)'
 const parses = () => ({ diagnostics: [] })
@@ -34,6 +45,13 @@ test('empty or whitespace-only text is empty, and the parser is not consulted', 
     assert.deepEqual(pastedSource('', parse), { error: 'empty' })
     assert.deepEqual(pastedSource(' \n\t ', parse), { error: 'empty' })
     assert.deepEqual(pastedSource(null, parse), { error: 'empty' })
+})
+
+test('text over the length limit is refused before it is parsed', () => {
+    const parse = () => assert.fail('parsed oversized text')
+    assert.deepEqual(pastedSource('x'.repeat(MAX_PROGRAM_LENGTH + 1), parse), { error: 'large' })
+    const atLimit = MAGENTA + ' '.repeat(MAX_PROGRAM_LENGTH - MAGENTA.length)
+    assert.equal(pastedSource(atLimit, parses).source.dsl, MAGENTA)
 })
 
 test('text the parser rejects is invalid, with its message', () => {
@@ -155,4 +173,151 @@ test('the teardown removes the listener', () => {
     assert.equal(target.count, 1)
     detach()
     assert.equal(target.count, 0)
+})
+
+// --- createProgramPaste: the flow against a real Channel and shader driver ---
+
+const COLOR_BARS = presetByName('Color Bars')
+
+function deferred() {
+    let resolve, reject
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+}
+
+/**
+ * A ChannelRenderer stand-in. check() and compile() answer from the
+ * handlers given (default: the program is fine), recording each call.
+ */
+function fakeRenderer({ check = async () => null, compile = async () => ({ success: true }) } = {}) {
+    return {
+        checks: [],
+        compiles: [],
+        check(dsl) { this.checks.push(dsl); return check(dsl) },
+        compile(dsl) { this.compiles.push(dsl); return compile(dsl) },
+    }
+}
+
+/** One channel already showing Color Bars, wired to a paste flow. */
+async function setup(rendererOptions, { clipboard = null } = {}) {
+    const renderer = fakeRenderer(rendererOptions)
+    const channel = new Channel({ id: 1, canvas: {}, driverFactory: (source) => makeShaderDriver(source, renderer) })
+    await channel.setSource(createSource('shader', { dsl: COLOR_BARS.dsl, name: COLOR_BARS.name }))
+    renderer.compiles.length = 0
+    const reports = []
+    let refreshes = 0
+    const flow = createProgramPaste({
+        channels: [channel],
+        renderers: [renderer],
+        parse: (dsl) => { if (!dsl.startsWith('search')) throw new Error('not a program') },
+        report: (value) => reports.push(value),
+        refresh: () => { refreshes++ },
+        clipboard,
+    })
+    return { channel, renderer, flow, reports, refreshes: () => refreshes }
+}
+
+test('a program that passes both checks goes on the channel and reports CH n', async () => {
+    const t = await setup()
+    await t.flow.paste(0, MAGENTA)
+    assert.deepEqual(t.channel.source, { type: 'shader', dsl: MAGENTA, name: 'Custom' })
+    assert.deepEqual(t.renderer.checks, [MAGENTA])
+    assert.deepEqual(t.renderer.compiles, [MAGENTA])
+    assert.deepEqual(t.reports, ['CH 1'])
+    assert.equal(t.refreshes(), 1)
+})
+
+test('empty, oversized and unparsable text are reported and never checked', async () => {
+    const t = await setup()
+    const before = t.channel.source
+    await t.flow.paste(0, '  ')
+    await t.flow.paste(0, 'x'.repeat(MAX_PROGRAM_LENGTH + 1))
+    await t.flow.paste(0, 'hello world')
+    assert.deepEqual(t.reports, ['EMPTY', 'TOO BIG', 'INVALID'])
+    assert.deepEqual(t.renderer.checks, [])
+    assert.equal(t.channel.source, before)
+    assert.equal(t.refreshes(), 3)
+})
+
+test('a program the renderer check rejects never touches the channel', async () => {
+    const t = await setup({ check: async () => "Unknown effect: 'notAnEffect'" })
+    const before = t.channel.source
+    const driver = t.channel.driver
+    await t.flow.paste(0, MAGENTA)
+    assert.deepEqual(t.reports, ['INVALID'])
+    assert.equal(t.channel.source, before)
+    assert.equal(t.channel.driver, driver) // not restarted
+    assert.deepEqual(t.renderer.compiles, [])
+})
+
+test('effects that fail to load report FAILED and leave the channel alone', async () => {
+    const t = await setup({ check: async () => { throw new Error('network') } })
+    const before = t.channel.source
+    await t.flow.paste(0, MAGENTA)
+    assert.deepEqual(t.reports, ['FAILED'])
+    assert.equal(t.channel.source, before)
+})
+
+test('a choice made while the check waits wins, and the paste gives up quietly', async () => {
+    const checked = deferred()
+    const t = await setup({ check: () => checked.promise })
+    const pasting = t.flow.paste(0, MAGENTA)
+    const grid = createSource('shader', { dsl: presetByName('Grid').dsl, name: 'Grid' })
+    await t.channel.setSource(grid)
+    checked.resolve(null)
+    await pasting
+    assert.equal(t.channel.source, grid)
+    assert.deepEqual(t.reports, [])
+    assert.deepEqual(t.renderer.compiles, [grid.dsl])
+})
+
+test('a failed check that a newer choice overtook reports nothing', async () => {
+    const checked = deferred()
+    const t = await setup({ check: () => checked.promise })
+    const pasting = t.flow.paste(0, MAGENTA)
+    await t.channel.setSource(createSource('shader', { dsl: presetByName('Grid').dsl, name: 'Grid' }))
+    checked.reject(new Error('network'))
+    await pasting
+    assert.deepEqual(t.reports, [])
+})
+
+test('a program that passes the check but fails to compile falls back and reports INVALID', async () => {
+    const t = await setup({ compile: async (dsl) => (dsl === MAGENTA ? { success: false, error: 'GPU' } : { success: true }) })
+    const before = t.channel.source
+    await t.flow.paste(0, MAGENTA)
+    assert.deepEqual(t.reports, ['INVALID'])
+    assert.equal(t.channel.source, before)
+    assert.deepEqual(t.renderer.compiles, [MAGENTA, COLOR_BARS.dsl])
+})
+
+test('a paste whose compile a newer choice overtook reports nothing', async () => {
+    const compiled = deferred()
+    const t = await setup({ compile: (dsl) => (dsl === MAGENTA ? compiled.promise : Promise.resolve({ success: true })) })
+    const pasting = t.flow.paste(0, MAGENTA)
+    await new Promise((r) => setImmediate(r)) // the check passes; the compile starts
+    assert.deepEqual(t.renderer.compiles, [MAGENTA])
+    const grid = createSource('shader', { dsl: presetByName('Grid').dsl, name: 'Grid' })
+    await t.channel.setSource(grid)
+    compiled.resolve({ success: false, superseded: true }) // as ChannelRenderer drops it
+    await pasting
+    assert.equal(t.channel.source, grid)
+    assert.deepEqual(t.reports, [])
+})
+
+test('Paste program reads the clipboard into the channel', async () => {
+    const t = await setup({}, { clipboard: { readText: async () => MAGENTA } })
+    await t.flow.pasteFromClipboard(0)
+    assert.equal(t.channel.source.dsl, MAGENTA)
+    assert.deepEqual(t.reports, ['CH 1'])
+})
+
+test('a clipboard read that is refused, or no clipboard at all, reports DENIED', async () => {
+    const refused = await setup({}, { clipboard: { readText: async () => { throw new DOMException('denied', 'NotAllowedError') } } })
+    await refused.flow.pasteFromClipboard(0)
+    assert.deepEqual(refused.reports, ['DENIED'])
+    assert.equal(refused.refreshes(), 1)
+
+    const none = await setup({}, { clipboard: undefined })
+    await none.flow.pasteFromClipboard(0)
+    assert.deepEqual(none.reports, ['DENIED'])
 })

@@ -7,12 +7,15 @@
  *
  * A program that fails to compile never reached the screen (the renderer
  * keeps its previous program), so start() rejects: the channel then falls
- * back to its previous source instead of naming one it is not showing.
+ * back to its previous source instead of naming one it is not showing. A
+ * compile a newer one overtook is no failure: the newer source owns the
+ * channel.
  */
 export function makeShaderDriver(source, renderer) {
     return {
         async start() {
             const result = await renderer.compile(source.dsl)
+            if (result?.superseded) return result
             if (!result?.success) throw new Error(result?.error || 'compile error')
             return result
         },

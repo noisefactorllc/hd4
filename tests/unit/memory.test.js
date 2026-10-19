@@ -171,6 +171,26 @@ test('applySnapshot tolerates a null/empty snapshot', () => {
     assert.doesNotThrow(() => applySnapshot(null, {}))
 })
 
+test('applySnapshot resolves once every recalled source has started or fallen back', async () => {
+    const settle = []
+    const order = []
+    const channel = (i) => ({
+        restore: () => new Promise((resolve, reject) => settle[i] = { resolve, reject }),
+    })
+    const done = applySnapshot({ channels: [{ type: 'none' }, { type: 'none' }] }, { channels: [channel(0), channel(1)] })
+    done.then(() => order.push('settled'))
+    settle[0].resolve()
+    await null
+    assert.deepEqual(order, []) // still waiting on channel 2
+    settle[1].reject(new Error('compile error')) // a failed restore does not reject the recall
+    await done
+    assert.deepEqual(order, ['settled'])
+})
+
+test('applySnapshot of no snapshot resolves at once', async () => {
+    await applySnapshot(null, {})
+})
+
 test('applySnapshot applies a legacy v1 snapshot (no composition/strip/mainBus)', () => {
     const calls = []
     const modules = {
