@@ -1353,3 +1353,164 @@ body {
 }
 .hd4-settings-panel::-webkit-scrollbar-thumb:hover,
 .hd4-stripedit-panel::-webkit-scrollbar-thumb:hover { background-color: var(--hf-border-hover); }
+
+/* ── Noisedeck Sync output dialog ──────────────────────────────────────────
+   The modal behind SYNC OUT (js/ui/syncOutputPanel.js). Shares visualize's
+   layout and element contract, flattened to HD4's industrial radii. */
+.sync-output-dialog {
+    position: fixed;
+    inset: 0;
+    width: min(560px, calc(100vw - 32px));
+    max-width: none;
+    max-height: calc(100dvh - 32px);
+    margin: auto;
+    padding: 0;
+    overflow-y: auto;
+    color: var(--hf-text-normal);
+    background: var(--hf-bg-surface);
+    border: var(--hf-border-width) solid var(--hf-border-subtle);
+    border-radius: var(--hf-radius-sm);
+    box-shadow: var(--hf-shadow-xl);
+    z-index: var(--hf-z-modal, 500);
+}
+.sync-output-dialog[open] { animation: hd4-dialog-open 0.2s ease-out; }
+.sync-output-dialog::backdrop {
+    background: var(--hf-backdrop, rgba(0, 0, 0, 0.6));
+}
+@keyframes hd4-dialog-open {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.sync-output-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--hf-space-3) var(--hf-space-4);
+    border-bottom: var(--hf-border-width) solid var(--hf-border-subtle);
+    background: var(--hf-bg-elevated);
+}
+.sync-output-heading {
+    display: flex;
+    align-items: center;
+    gap: var(--hf-space-2);
+    color: var(--hf-text-bright);
+    font-family: var(--hf-font-family);
+    font-weight: var(--hf-weight-bold);
+    letter-spacing: var(--hf-tracking-wide);
+}
+.sync-output-live {
+    padding: 2px 7px;
+    color: var(--hf-text-bright);
+    background: var(--hf-red);
+    border-radius: var(--hf-radius-sm);
+    font-family: var(--hf-font-family-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+}
+
+.sync-output-body {
+    display: grid;
+    gap: var(--hf-space-4);
+    padding: var(--hf-space-4);
+}
+.sync-output-body > p { margin: 0; line-height: 1.5; }
+.sync-output-preview { color: var(--hf-text-dim); font-size: var(--hf-size-xs); }
+.sync-output-preview a { color: var(--hf-accent); }
+
+.sync-output-field {
+    display: grid;
+    gap: var(--hf-space-2);
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-xs);
+    letter-spacing: var(--hf-tracking-wide);
+    text-transform: uppercase;
+}
+.sync-output-field input {
+    min-width: 0;
+    padding: var(--hf-space-2) var(--hf-space-3);
+    color: var(--hf-text-bright);
+    background: var(--hf-bg-base);
+    border: var(--hf-border-width) solid var(--hf-border-subtle);
+    border-radius: var(--hf-radius-sm);
+    font: inherit;
+    letter-spacing: normal;
+    text-transform: none;
+}
+.sync-output-field input:focus {
+    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
+    border-color: var(--hf-accent);
+}
+.sync-output-field input[aria-invalid="true"] { border-color: var(--hf-red); }
+
+.sync-output-meta,
+.sync-output-counters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--hf-space-2);
+}
+.sync-output-counters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sync-output-meta > div,
+.sync-output-counters > div {
+    display: grid;
+    gap: var(--hf-space-1);
+    min-width: 0;
+    padding: var(--hf-space-2);
+    background: var(--hf-bg-base);
+    border: var(--hf-border-width) solid var(--hf-border-subtle);
+    border-radius: var(--hf-radius-sm);
+}
+.sync-output-meta span,
+.sync-output-counters span {
+    color: var(--hf-text-dim);
+    font-family: var(--hf-font-family-mono);
+    font-size: 10px;
+    letter-spacing: var(--hf-tracking-wide);
+    text-transform: uppercase;
+}
+.sync-output-meta strong,
+.sync-output-counters output {
+    overflow: hidden;
+    color: var(--hf-text-bright);
+    font-family: var(--hf-font-family-mono);
+    font-size: var(--hf-size-sm);
+    font-weight: var(--hf-weight-normal);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sync-output-message {
+    min-height: 48px;
+    padding: var(--hf-space-3);
+    color: var(--hf-text-dim);
+    background: color-mix(in srgb, var(--hf-accent) 8%, var(--hf-bg-base));
+    border-left: 3px solid var(--hf-accent);
+    font-size: var(--hf-size-sm);
+    line-height: 1.45;
+}
+.sync-output-message p { margin: 0; }
+.sync-output-message p + p { margin-top: var(--hf-space-2); }
+.sync-output-dialog[data-tone="error"] .sync-output-message { border-left-color: var(--hf-red); }
+
+.sync-output-action {
+    justify-self: end;
+    min-width: 148px;
+    padding: var(--hf-space-2) var(--hf-space-4);
+    color: var(--hf-bg-base);
+    background: var(--hf-accent);
+    border: 0;
+    border-radius: var(--hf-radius-sm);
+    cursor: pointer;
+    font-family: var(--hf-font-family-mono);
+    font-weight: var(--hf-weight-bold);
+}
+.sync-output-action:focus-visible {
+    outline: var(--hf-focus-ring-width) solid var(--hf-focus-ring-color);
+    outline-offset: var(--hf-focus-ring-offset);
+}
+.sync-output-action:disabled { cursor: wait; opacity: 0.55; }
+
+@media (max-width: 620px) {
+    .sync-output-meta,
+    .sync-output-counters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

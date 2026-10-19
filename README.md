@@ -36,6 +36,9 @@ Playwright integration suite).
 - **FREEZE**, **OUTPUT FADE**, **STILL** capture (a freeze-frame usable as a KEY source
   or a channel image), and output **VFX** (negative / mono / sepia / posterize / emboss / find-edges).
 - **Recording** the program (video + audio) to a file via MediaRecorder.
+- **SYNC OUT** publishes the program through [Noisedeck Sync](https://sync.noisedeck.app/)
+  (Syphon / Spout / NDI / the Sync Camera), and **VIEWPORT** mirrors it in a window for a
+  secondary display (drag it to the projector, press **F** for full screen).
 
 **Audio**
 - Full per-channel strip: **HPF, 3-band EQ, gate, compressor, pan, delay**, plus **AUX / REV sends**.

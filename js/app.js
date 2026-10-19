@@ -60,6 +60,13 @@ import { buildUserBar } from './ui/userBar.js'
 import { MidiMap, parseMidiMessage } from './midi.js'
 import { buildMidiPanel } from './ui/midiPanel.js'
 import { buildMainBusEditor } from './ui/mainBusEditor.js'
+import { buildSyncOutputPanel } from './ui/syncOutputPanel.js'
+import { SinkManager } from './noisemaker/bundle.js'
+import { ProgramOutput } from './programOutput.js'
+import { ProgramExportQueue } from './programExportQueue.js'
+import { ViewportWindow } from './viewportWindow.js'
+import { SyncOutputController, createSyncOutputConnectionProvider, deriveSyncOutputView } from './syncOutput.js'
+import { createSyncOutputDialog } from './syncOutputDialog.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -177,6 +184,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         onVfx: (name) => { output.setVfx(name); showParam('VFX', String(name).toUpperCase()) },
         onStill: () => captureStill(),
         onRecord: () => toggleRecording(),
+        onViewport: () => openViewport(),
     })
 
     // --- Status readout: the shared handfish <led-matrix> micro-OLED. Mounted
@@ -223,6 +231,67 @@ async function bootInto({ container = null, audioContext = null, destination = n
     const compositor = new ProgramCompositor(programView.canvas, { width: PROGRAM_W, height: PROGRAM_H })
     compositor.setChannels(state.channels)
     state.compositor = compositor
+
+    // --- Program output: each finished program frame fans out from here to
+    //     the external outputs (viewport window, Noisedeck Sync). RGBA Sync
+    //     frames are read back asynchronously on the GPU; see
+    //     programExportQueue.js. ---
+    // A failing sink is isolated from the program; report it at most once a second.
+    let lastSinkWarning = -Infinity
+    const warnSinkError = (e) => {
+        const t = now()
+        if (t - lastSinkWarning < 1000) return
+        lastSinkWarning = t
+        console.warn('[hd4] program output sink', e?.message || e)
+    }
+    const programOutput = new ProgramOutput({
+        canvas: programView.canvas,
+        sinkManager: new SinkManager({ onError: warnSinkError }),
+        createExportQueue: ({ canvas, slots }) => new ProgramExportQueue({ canvas, slots }),
+    })
+    state.programOutput = programOutput
+
+    // Secondary display: the program mirrored in a popup (drag it to the
+    // projector, press F for full screen), like Noisedeck's viewport window.
+    const viewportWindow = new ViewportWindow({
+        output: programOutput,
+        onChange: (open) => outputBar.setViewport(open),
+    })
+    outputBar.setViewport(false)
+    // Open, or focus the open window. As in Noisedeck, the button never closes
+    // a live secondary display: closing the window detaches it.
+    function openViewport() {
+        showParam('VIEWPORT', viewportWindow.open() ? 'ON' : 'BLOCKED')
+    }
+
+    // Noisedeck Sync: publish the program through the local Sync companion.
+    // Construction stays passive: discovery and pairing happen only after the
+    // operator opens the dialog and acts.
+    const syncPanel = buildSyncOutputPanel(app)
+    const syncOutputController = new SyncOutputController({
+        renderer: programOutput,
+        getCanvas: () => programOutput.canvas,
+        getDescriptor: () => programOutput.descriptor,
+        connectionProvider: createSyncOutputConnectionProvider({
+            transport: window.__HD4_SYNC_TRANSPORT__,
+        }),
+    })
+    const syncOutputDialog = createSyncOutputDialog({ controller: syncOutputController })
+    const unsubscribeSyncLed = syncOutputController.subscribe((s) => outputBar.setSyncLive(deriveSyncOutputView(s).live))
+    const disposeOutputs = () => {
+        unsubscribeSyncLed()
+        syncOutputDialog.destroy()
+        syncOutputController.dispose()
+        syncPanel.remove()
+        viewportWindow.close()
+        programOutput.close()
+    }
+    const onPageHide = (event) => {
+        if (event.persisted) return
+        window.removeEventListener('pagehide', onPageHide)
+        disposeOutputs()
+    }
+    window.addEventListener('pagehide', onPageHide)
 
     // --- Composition bar (PinP / SPLIT / QUAD / KEY) ---
     const compositionBar = buildCompositionBar(byId('hd4-compositor'), {
@@ -547,11 +616,12 @@ async function bootInto({ container = null, audioContext = null, destination = n
         settings: () => settingsDrawer.toggle(),
     }, document, {
         // Global single-key shortcuts are suspended while any overlay panel
-        // (settings drawer, channel-strip / main-bus editor, MIDI panel) is
-        // open, so keys pressed inside it only reach that panel's controls.
+        // (settings drawer, channel-strip / main-bus editor, MIDI panel, Sync
+        // output dialog) is open, so keys pressed inside it only reach that
+        // panel's controls.
         isSuspended: () =>
             settingsDrawer.isOpen || stripEditor.isOpen ||
-            mainBusEditor.isOpen || midiPanel.isOpen,
+            mainBusEditor.isOpen || midiPanel.isOpen || syncPanel.isOpen,
     })
 
     // --- USER assignable macro buttons ---
@@ -719,6 +789,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         const pres = switcher.tick(t)
         const out = { ...output.tick(t), ...compositorState.snapshot() }
         compositor.draw(pres, switcher.type, out)
+        programOutput.publish(t)
         programView.setLive(switcher.live, switcher.transitioning)
         previewView.drawSource(state.channels[previewBus.preview - 1]?.canvas)
         outputBar.setState({ freeze: output.freeze, faded: output.faded })
@@ -751,6 +822,9 @@ async function bootInto({ container = null, audioContext = null, destination = n
         still: stillStore,
         captureStill,
         recorder,
+        programOutput,
+        viewport: viewportWindow,
+        syncOutput: syncOutputController,
         get recordSource() { return recordSource },
         userButtons,
         midi: { map: midiMap, simulate: (bytes) => onMidi(bytes) },
@@ -822,6 +896,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
         // The rack adapter calls this on unmount; standalone never does.
         stop() {
             if (_rafId != null) { cancelAnimationFrame(_rafId); _rafId = null }
+            window.removeEventListener('pagehide', onPageHide)
+            try { disposeOutputs() } catch (e) { console.warn('[hd4] output teardown', e?.message || e) }
             beatClock.stop()
             try { audio.dispose() } catch { /* ignore */ }
             state.ready = false

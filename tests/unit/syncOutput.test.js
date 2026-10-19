@@ -1,0 +1,1387 @@
+// SPDX-License-Identifier: MIT
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+const syncOutput = await import('../../js/syncOutput.js')
+const { SyncH264CanvasSender } = await import('../../js/syncH264CanvasSender.js')
+
+function deferred() {
+    let resolve
+    let reject
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise
+        reject = rejectPromise
+    })
+    return { promise, resolve, reject }
+}
+
+async function flushMicrotasks(turns = 4) {
+    for (let turn = 0; turn < turns; turn++) await Promise.resolve()
+}
+
+function welcome(providerIds = ['syphon'], version = '0.2.19') {
+    return {
+        type: 'welcome',
+        protocolVersion: 1,
+        version,
+        instanceId: 'sync-test',
+        capabilities: {
+            send: true,
+            receive: false,
+            providers: providerIds.map((id) => ({
+                id,
+                direction: 'send',
+                available: true,
+                selected: true
+            }))
+        }
+    }
+}
+
+function health(providerIds = ['syphon']) {
+    return {
+        product: 'Sync',
+        status: 'ok',
+        version: '0.2.19',
+        protocolVersions: [1],
+        instanceId: 'sync-test',
+        capabilities: welcome(providerIds).capabilities
+    }
+}
+
+function manualTimers() {
+    let nextId = 1
+    const intervals = new Map()
+    const timeouts = new Map()
+    return {
+        intervals,
+        timeouts,
+        setInterval(callback, delay) {
+            const id = nextId++
+            intervals.set(id, { callback, delay })
+            return id
+        },
+        clearInterval(id) { intervals.delete(id) },
+        setTimeout(callback, delay) {
+            const id = nextId++
+            timeouts.set(id, { callback, delay })
+            return id
+        },
+        clearTimeout(id) { timeouts.delete(id) },
+        fireTimeout(delay) {
+            const entry = [...timeouts.entries()].find(([, timer]) => timer.delay === delay)
+            assert.ok(entry, `expected a ${delay}ms timeout`)
+            const [id, timer] = entry
+            timeouts.delete(id)
+            timer.callback()
+        }
+    }
+}
+
+function senderFixture() {
+    const completion = deferred()
+    let closeCalls = 0
+    let closed = false
+    const sender = {
+        closed: completion.promise,
+        stats: { accepted: 0, droppedBusy: 0, droppedBackpressure: 0, sent: 0, failed: 0 },
+        configure() {},
+        submit() { return true },
+        close() {
+            if (closed) return
+            closed = true
+            closeCalls++
+            completion.resolve()
+        }
+    }
+    return {
+        sender,
+        completion,
+        get closeCalls() { return closeCalls }
+    }
+}
+
+function senderLoss(closeCode, closeReason = '') {
+    return Object.assign(new Error('private transport detail'), {
+        code: 'SYNC_SENDER_LOST',
+        closeCode,
+        closeReason
+    })
+}
+
+function recoveryProbe(result, counters = {}) {
+    return {
+        async probe() {
+            counters.probes = (counters.probes || 0) + 1
+            return result
+        },
+        close() { counters.closes = (counters.closes || 0) + 1 }
+    }
+}
+
+function recoveryConnection({ sender, providerIds = ['syphon'], pendingConnect, counters = {} }) {
+    return {
+        async connect() {
+            counters.connects = (counters.connects || 0) + 1
+            return pendingConnect ? pendingConnect.promise : welcome(providerIds)
+        },
+        async createSender() {
+            counters.senderCreations = (counters.senderCreations || 0) + 1
+            return sender
+        },
+        close() { counters.closes = (counters.closes || 0) + 1 }
+    }
+}
+
+async function connectedRecoveryFixture({
+    renderer,
+    canvas = { width: 1280, height: 720 },
+    initial = senderFixture(),
+    providerIds = ['syphon'],
+    recoveryClients = [],
+    random = () => 0,
+    timers = manualTimers()
+} = {}) {
+    const stableRenderer = renderer || {
+        pipeline: {},
+        createFrameExportQueue: () => ({ close() {} }),
+        addSink: (sink) => () => sink.close()
+    }
+    const token = '9'.repeat(64)
+    const clients = [
+        {
+            async pair() { return { protocolVersion: 1, token } },
+            close() {}
+        },
+        {
+            async connect() { return welcome(providerIds) },
+            async createSender() { return initial.sender },
+            close() {}
+        },
+        ...recoveryClients
+    ]
+    const calls = []
+    const controller = new syncOutput.SyncOutputController({
+        random,
+        renderer: stableRenderer,
+        getCanvas: () => canvas,
+        connectionProvider: {
+            createClient(options) {
+                calls.push(options)
+                const client = clients.shift()
+                if (!client) throw new Error('unexpected Sync client creation')
+                return client
+            }
+        },
+        setInterval: timers.setInterval,
+        clearInterval: timers.clearInterval,
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout
+    })
+    await controller.connect()
+    await controller.start('Recovery source')
+    return { controller, initial, calls, renderer: stableRenderer, timers }
+}
+
+function createFixture() {
+    const events = []
+    const closed = deferred()
+    const sender = {
+        closed: closed.promise,
+        stats: {
+            accepted: 2,
+            droppedBusy: 1,
+            droppedBackpressure: 3,
+            sent: 1,
+            failed: 0
+        },
+        configure(descriptor) { events.push(['configure', descriptor]) },
+        submit(textureId, timestamp) {
+            events.push(['submit', textureId, timestamp])
+            return true
+        },
+        close() {
+            events.push('sender close')
+            closed.resolve()
+        }
+    }
+    const queue = { close() { events.push('queue close') } }
+    let attachedSink
+    const renderer = {
+        pipeline: { id: 'mixer-pipeline' },
+        createFrameExportQueue(options) {
+            events.push(['queue', options])
+            return queue
+        },
+        addSink(sink) {
+            attachedSink = sink
+            sink.configure({
+                width: 1280,
+                height: 720,
+                format: 'rgba8unorm',
+                colorSpace: 'srgb',
+                alphaMode: 'premultiplied',
+                fps: 60
+            })
+            events.push('sink attached')
+            let removed = false
+            return () => {
+                if (removed) return
+                removed = true
+                events.push('sink removed')
+                sink.close()
+            }
+        }
+    }
+    const token = 'a'.repeat(64)
+    let clientIndex = 0
+    const clients = [
+        {
+            async pair(name) {
+                events.push(['pair', name])
+                return { protocolVersion: 1, token }
+            },
+            close() { events.push('pairing close') }
+        },
+        {
+            async connect() {
+                events.push('connect')
+                return welcome()
+            },
+            async createSender(name, options) {
+                events.push(['createSender', name, options])
+                return sender
+            },
+            close() { events.push('client close') }
+        }
+    ]
+    const connectionProvider = {
+        createClient(options) {
+            events.push(['createClient', options])
+            return clients[clientIndex++]
+        }
+    }
+    return {
+        connectionProvider,
+        events,
+        get attachedSink() { return attachedSink },
+        queue,
+        renderer,
+        sender
+    }
+}
+
+test('publishes the HD4 program output through a bounded Sync sender sink', async () => {
+    assert.equal(typeof syncOutput.SyncOutputController, 'function')
+    const fixture = createFixture()
+    const canvas = { width: 1280, height: 720 }
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        renderer: fixture.renderer,
+        getCanvas: () => canvas,
+        connectionProvider: fixture.connectionProvider,
+        clock: { timeOrigin: 1_700_000_000_000 },
+        setInterval: () => 1,
+        clearInterval: () => {},
+        setTimeout: () => 2,
+        clearTimeout: () => {}
+    })
+
+    await controller.connect()
+    await controller.start('HD4 Main')
+
+    assert.equal(controller.state.status, 'sending')
+    assert.equal(controller.state.connected, true)
+    assert.deepEqual(controller.state.providerIds, ['syphon'])
+    assert.equal(controller.state.senderName, 'HD4 Main')
+    assert.deepEqual(
+        [controller.state.width, controller.state.height, controller.state.fps],
+        [1280, 720, 60]
+    )
+    assert.deepEqual(controller.state.stats, {
+        accepted: 2,
+        droppedBusy: 1,
+        droppedBackpressure: 3,
+        sent: 1,
+        failed: 0
+    })
+    assert.deepEqual(fixture.events.find((event) => event[0] === 'pair'), ['pair', 'HD4'])
+    const createSender = fixture.events.find((event) => event[0] === 'createSender')
+    assert.equal(createSender[1], 'HD4 Main')
+    assert.equal(createSender[2].exportQueue, fixture.queue)
+    assert.equal(createSender[2].maxBufferedFrames, 1)
+    assert.deepEqual(
+        fixture.events.find((event) => event[0] === 'queue'),
+        ['queue', { slots: 3 }]
+    )
+
+    assert.equal(fixture.attachedSink.submit('mixer-texture', 42), true)
+    assert.deepEqual(
+        fixture.events.find((event) => event[0] === 'submit'),
+        ['submit', 'mixer-texture', 42]
+    )
+
+    await controller.stop()
+    assert.equal(controller.state.status, 'ready')
+    assert.equal(controller.state.connected, false)
+    assert.deepEqual(controller.state.stats, {
+        accepted: 2,
+        droppedBusy: 1,
+        droppedBackpressure: 3,
+        sent: 1,
+        failed: 0
+    })
+    fixture.sender.stats.sent = 99
+    assert.equal(controller.state.stats.sent, 1)
+    assert.ok(fixture.events.includes('sink removed'))
+    assert.ok(fixture.events.includes('sender close'))
+    assert.ok(fixture.events.includes('client close'))
+})
+
+test('rejects an invalid Sync sender name before allocating renderer resources', async () => {
+    assert.equal(typeof syncOutput.SyncOutputController, 'function')
+    const fixture = createFixture()
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        renderer: fixture.renderer,
+        getCanvas: () => ({ width: 1280, height: 720 }),
+        connectionProvider: fixture.connectionProvider
+    })
+    await controller.connect()
+
+    for (const invalidName of [
+        'line\nbreak',
+        'zero\u200bwidth',
+        'right\u202eto-left',
+        'arabic\u061cmark',
+        'soft\u00adhyphen',
+        'interlinear\ufff9annotation',
+        'language\u{e0001}tag'
+    ]) {
+        await assert.rejects(controller.start(invalidName), {
+            code: 'SYNC_INVALID_SENDER_NAME'
+        })
+    }
+    assert.equal(controller.state.status, 'error')
+    assert.equal(fixture.events.some((event) => event[0] === 'queue'), false)
+    assert.equal(fixture.events.some((event) => event[0] === 'createSender'), false)
+})
+
+test('connects when the operator acts as passive discovery becomes ready', async () => {
+    const events = []
+    const clients = [
+        {
+            async probe() { return { available: true, health: welcome() } },
+            close() { events.push('passive close') }
+        },
+        {
+            async pair(name) {
+                events.push(['pair', name])
+                return { protocolVersion: 1, token: 'c'.repeat(64) }
+            },
+            close() { events.push('pairing close') }
+        },
+        {
+            async connect() { return welcome() },
+            close() { events.push('client close') }
+        }
+    ]
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        connectionProvider: { createClient: () => clients.shift() }
+    })
+    let connectPromise
+    controller.subscribe((state) => {
+        if (state.status === 'ready' && !state.connected && !connectPromise) {
+            connectPromise = controller.connect()
+        }
+    })
+
+    await controller.checkAvailability()
+    await connectPromise
+
+    assert.equal(controller.state.connected, true)
+    assert.deepEqual(events.find((event) => event[0] === 'pair'), ['pair', 'HD4'])
+})
+
+test('dispose closes an in-flight pairing client and prevents a late token from connecting', async () => {
+    const pendingPair = deferred()
+    let pairingCloses = 0
+    let authenticatedCreations = 0
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        connectionProvider: {
+            createClient(options) {
+                if (Object.hasOwn(options, 'token')) {
+                    authenticatedCreations++
+                    throw new Error('late pairing must not create an authenticated client')
+                }
+                return {
+                    pair: () => pendingPair.promise,
+                    close() { pairingCloses++ }
+                }
+            }
+        }
+    })
+
+    const connecting = controller.connect()
+    await flushMicrotasks()
+    controller.dispose()
+    controller.dispose()
+
+    assert.equal(pairingCloses, 1)
+    pendingPair.resolve({ protocolVersion: 1, token: 'd'.repeat(64) })
+    await assert.rejects(connecting, { code: 'SYNC_LIFECYCLE' })
+    assert.equal(authenticatedCreations, 0)
+    assert.equal(controller.state.connected, false)
+})
+
+test('immediate dispose closes synchronously tracked client without yielding microtasks', async () => {
+    const pendingPair = deferred()
+    let pairingCloses = 0
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        connectionProvider: {
+            createClient() {
+                return {
+                    pair: () => pendingPair.promise,
+                    close() { pairingCloses++ }
+                }
+            }
+        }
+    })
+
+    const connecting = controller.connect()
+    controller.dispose()
+
+    assert.equal(pairingCloses, 1)
+    pendingPair.resolve({ protocolVersion: 1, token: 'a'.repeat(64) })
+    await assert.rejects(connecting, { code: 'SYNC_LIFECYCLE' })
+})
+
+test('dispose closes an in-flight authenticated client and ignores its late welcome', async () => {
+    const pendingWelcome = deferred()
+    let authenticatedCloses = 0
+    const clients = [
+        {
+            async pair() { return { protocolVersion: 1, token: 'e'.repeat(64) } },
+            close() {}
+        },
+        {
+            connect: () => pendingWelcome.promise,
+            close() { authenticatedCloses++ }
+        }
+    ]
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        connectionProvider: { createClient: () => clients.shift() }
+    })
+
+    const connecting = controller.connect()
+    await flushMicrotasks(8)
+    controller.dispose()
+
+    assert.equal(authenticatedCloses, 1)
+    pendingWelcome.resolve(welcome())
+    await assert.rejects(connecting, { code: 'SYNC_LIFECYCLE' })
+    assert.equal(controller.state.connected, false)
+})
+
+test('dispose releases a pending start queue and closes the late sender exactly once', async () => {
+    const pendingSender = deferred()
+    const senderClosed = deferred()
+    const canvas = { width: 1280, height: 720 }
+    let queueCloses = 0
+    let senderCloses = 0
+    let clientCloses = 0
+    let sinkAttachments = 0
+    const sender = {
+        closed: senderClosed.promise,
+        stats: { accepted: 0, droppedBusy: 0, droppedBackpressure: 0, sent: 0, failed: 0 },
+        configure() {},
+        submit() { return true },
+        close() {
+            senderCloses++
+            senderClosed.resolve()
+        }
+    }
+    const clients = [
+        {
+            async pair() { return { protocolVersion: 1, token: 'f'.repeat(64) } },
+            close() {}
+        },
+        {
+            async connect() { return welcome() },
+            createSender: () => pendingSender.promise,
+            close() { clientCloses++ }
+        }
+    ]
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        renderer: {
+            pipeline: {},
+            createFrameExportQueue: () => ({ close() { queueCloses++ } }),
+            addSink() {
+                sinkAttachments++
+                return () => {}
+            }
+        },
+        getCanvas: () => canvas,
+        connectionProvider: { createClient: () => clients.shift() }
+    })
+    await controller.connect()
+
+    const starting = controller.start('Pending sender')
+    await flushMicrotasks()
+    controller.dispose()
+
+    assert.equal(queueCloses, 1)
+    assert.equal(clientCloses, 1)
+    pendingSender.resolve(sender)
+    await assert.rejects(starting, { code: 'SYNC_LIFECYCLE' })
+    assert.equal(senderCloses, 1)
+    assert.equal(sinkAttachments, 0)
+    assert.notEqual(controller.state.status, 'sending')
+})
+
+test('dispose tears down a live sender once and is idempotent', async () => {
+    const fixture = createFixture()
+    const canvas = { width: 1280, height: 720 }
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        renderer: fixture.renderer,
+        getCanvas: () => canvas,
+        connectionProvider: fixture.connectionProvider
+    })
+    await controller.connect()
+    await controller.start('Live sender')
+
+    controller.dispose()
+    controller.dispose()
+
+    assert.equal(fixture.events.filter((event) => event === 'sink removed').length, 1)
+    assert.equal(fixture.events.filter((event) => event === 'sender close').length, 1)
+    assert.equal(fixture.events.filter((event) => event === 'client close').length, 1)
+    assert.equal(controller.state.connected, false)
+    assert.equal(controller.state.senderName, null)
+    await assert.rejects(controller.checkAvailability(), { code: 'SYNC_LIFECYCLE' })
+    await assert.rejects(controller.connect(), { code: 'SYNC_LIFECYCLE' })
+    await assert.rejects(controller.start('Late'), { code: 'SYNC_LIFECYCLE' })
+})
+
+test('recovery continues after the fast ramp and reconnects without pairing again', async () => {
+    const unavailable = () => recoveryProbe({ available: false, code: 'SYNC_UNAVAILABLE' })
+    const replacement = senderFixture()
+    const fixture = await connectedRecoveryFixture({
+        recoveryClients: [unavailable(), unavailable(), unavailable(), unavailable(),
+            recoveryProbe({ available: true, health: health() }),
+            recoveryConnection({ sender: replacement.sender })]
+    })
+    fixture.initial.completion.reject(senderLoss(1006))
+    await flushMicrotasks()
+    for (const delay of [250, 1000, 4000, 10_000]) {
+        fixture.timers.fireTimeout(delay)
+        await flushMicrotasks(12)
+        assert.equal(fixture.controller.state.status, 'recovering')
+        assert.equal(fixture.controller.state.error, null)
+    }
+    fixture.timers.fireTimeout(10_000)
+    await flushMicrotasks(20)
+    assert.equal(fixture.controller.state.status, 'sending')
+    assert.equal(fixture.calls.filter(call => call.token).length, 2)
+    fixture.controller.dispose()
+    assert.equal(fixture.timers.timeouts.size, 0)
+    assert.equal(fixture.timers.intervals.size, 0)
+})
+
+test('Stop cancels sustained recovery with no later attempts', async () => {
+    const fixture = await connectedRecoveryFixture({
+        recoveryClients: Array.from({ length: 3 }, () => recoveryProbe({ available: false, code: 'SYNC_UNAVAILABLE' }))
+    })
+    fixture.initial.completion.reject(senderLoss(1006))
+    await flushMicrotasks()
+    for (const delay of [250, 1000, 4000]) {
+        fixture.timers.fireTimeout(delay)
+        await flushMicrotasks(12)
+    }
+    assert.equal(fixture.controller.state.status, 'recovering')
+    await fixture.controller.stop()
+    assert.equal(fixture.timers.timeouts.size, 0)
+    assert.equal(fixture.calls.length, 5)
+    assert.equal(fixture.controller.state.status, 'ready')
+})
+
+test('dispose during recovery cancels the pending ramp and produces no later attempts', async () => {
+    const counters = { probes: 0 }
+    const fixture = await connectedRecoveryFixture({
+        recoveryClients: [recoveryProbe({ available: false, code: 'SYNC_UNAVAILABLE' }, counters)]
+    })
+    fixture.initial.completion.reject(senderLoss(1006))
+    await flushMicrotasks()
+    assert.equal(fixture.controller.state.status, 'recovering')
+    assert.equal(counters.probes, 0, 'no probe may run while the ramp delay is pending')
+    assert.equal(fixture.timers.timeouts.size, 1)
+
+    fixture.controller.dispose()
+    assert.equal(fixture.timers.timeouts.size, 0, 'recovery ramp timer must be cancelled by teardown')
+    assert.equal(fixture.timers.intervals.size, 0)
+    assert.throws(() => fixture.timers.fireTimeout(250), /expected a 250ms timeout/)
+    await flushMicrotasks(8)
+    assert.equal(counters.probes, 0, 'no recovery probe may run after teardown')
+    assert.equal(fixture.controller.state.status, 'idle')
+    assert.equal(fixture.controller.state.senderName, null)
+    assert.equal(fixture.controller.state.error, null)
+})
+
+test('dispose closes an in-flight recovery probe exactly once and drops its late result', async () => {
+    const probeResult = deferred()
+    const counters = {}
+    const probeClient = {
+        probe: () => { counters.probes = (counters.probes || 0) + 1; return probeResult.promise },
+        close() { counters.closes = (counters.closes || 0) + 1 }
+    }
+    const lateSender = senderFixture()
+    const connection = recoveryConnection({ sender: lateSender.sender, counters })
+    const fixture = await connectedRecoveryFixture({
+        recoveryClients: [probeClient, connection]
+    })
+    fixture.initial.completion.reject(senderLoss(1006))
+    await flushMicrotasks()
+    fixture.timers.fireTimeout(250)
+    await flushMicrotasks()
+    assert.equal(counters.probes, 1)
+
+    fixture.controller.dispose()
+    assert.equal(counters.closes, 1, 'teardown must close the in-flight recovery probe exactly once')
+    probeResult.resolve({ available: true, health: health() })
+    await flushMicrotasks(12)
+    assert.equal(counters.connects, undefined, 'late probe result must not reach connect')
+    assert.equal(counters.senderCreations, undefined, 'late probe result must not create a sender')
+    assert.equal(lateSender.closeCalls, 0)
+    assert.equal(fixture.controller.state.status, 'idle')
+})
+
+test('recovery adopts a resize of the same canvas and retains the loss cause', async () => {
+    const canvas = { width: 1280, height: 720 }
+    const replacement = senderFixture()
+    const fixture = await connectedRecoveryFixture({ canvas, recoveryClients: [
+        recoveryProbe({ available: true, health: health() }),
+        recoveryConnection({ sender: replacement.sender })
+    ] })
+    fixture.initial.completion.reject(senderLoss(1008, 'incomplete_frame_timeout'))
+    await flushMicrotasks()
+    canvas.width = 1920
+    canvas.height = 1080
+    fixture.timers.fireTimeout(250)
+    await flushMicrotasks(20)
+    assert.equal(fixture.controller.state.status, 'sending')
+    assert.equal(fixture.controller.state.width, 1920)
+    assert.equal(fixture.controller.state.height, 1080)
+    assert.equal(fixture.controller._lastRecoveryCause.closeCode, 1008)
+    assert.equal(fixture.controller._lastRecoveryCause.closeReason, 'incomplete_frame_timeout')
+    assert.equal(fixture.controller._lastRecoveryCause.recoveryCount, 1)
+    fixture.controller.dispose()
+})
+
+test('recovery retains attempts during probation and resets the budget after 60 seconds', async () => {
+    const firstReplacement = senderFixture()
+    const secondReplacement = senderFixture()
+    const fixture = await connectedRecoveryFixture({
+        recoveryClients: [
+            recoveryProbe({ available: true, health: health() }),
+            recoveryConnection({ sender: firstReplacement.sender }),
+            recoveryProbe({ available: true, health: health() }),
+            recoveryConnection({ sender: secondReplacement.sender })
+        ]
+    })
+
+    fixture.initial.completion.reject(senderLoss(1006))
+    await flushMicrotasks()
+    fixture.timers.fireTimeout(250)
+    await flushMicrotasks(12)
+    assert.deepEqual([...fixture.timers.timeouts.values()].map((timer) => timer.delay), [60_000])
+
+    firstReplacement.completion.reject(senderLoss(1011))
+    await flushMicrotasks()
+    assert.deepEqual([...fixture.timers.timeouts.values()].map((timer) => timer.delay), [1000])
+    fixture.timers.fireTimeout(1000)
+    await flushMicrotasks(12)
+
+    fixture.timers.fireTimeout(60_000)
+    await flushMicrotasks()
+    secondReplacement.completion.reject(senderLoss(1013))
+    await flushMicrotasks()
+    assert.deepEqual([...fixture.timers.timeouts.values()].map((timer) => timer.delay), [250])
+    await fixture.controller.stop()
+})
+
+test('recovery rejects provider and renderer replacement without acquiring later resources', async (t) => {
+    await t.test('provider replacement', async () => {
+        const counters = {}
+        const fixture = await connectedRecoveryFixture({
+            recoveryClients: [
+                recoveryProbe({ available: true, health: health(['ndi', 'syphon']) }, counters)
+            ]
+        })
+
+        fixture.initial.completion.reject(senderLoss(1006))
+        await flushMicrotasks()
+        fixture.timers.fireTimeout(250)
+        await flushMicrotasks(12)
+
+        assert.equal(fixture.controller.state.status, 'error')
+        assert.equal(fixture.controller.state.error.code, 'SYNC_PROVIDER_REPLACED')
+        assert.deepEqual(counters, { probes: 1, closes: 1 })
+        assert.equal(fixture.calls.length, 3)
+    })
+
+    await t.test('renderer replacement', async () => {
+        const renderer = {
+            pipeline: { id: 'initial' },
+            createFrameExportQueue: () => ({ close() {} }),
+            addSink: (sink) => () => sink.close()
+        }
+        const fixture = await connectedRecoveryFixture({
+            renderer,
+            recoveryClients: [recoveryProbe({ available: true, health: health() })]
+        })
+
+        fixture.initial.completion.reject(senderLoss(1006))
+        await flushMicrotasks()
+        renderer.pipeline = { id: 'replacement' }
+        fixture.timers.fireTimeout(250)
+        await flushMicrotasks(12)
+
+        assert.equal(fixture.controller.state.status, 'error')
+        assert.equal(fixture.controller.state.error.code, 'SYNC_RENDERER_REPLACED')
+        assert.equal(fixture.calls.length, 2)
+    })
+})
+
+test('stopping recovery closes an in-flight connection and late sender resources exactly once', async () => {
+    const pendingSender = deferred()
+    const replacement = senderFixture()
+    let queueNumber = 0
+    let recoveryQueueCloses = 0
+    let connectionCloses = 0
+    const renderer = {
+        pipeline: {},
+        createFrameExportQueue() {
+            queueNumber++
+            const number = queueNumber
+            return {
+                close() {
+                    if (number === 2) recoveryQueueCloses++
+                }
+            }
+        },
+        addSink: (sink) => () => sink.close()
+    }
+    const connection = {
+        async connect() { return welcome() },
+        createSender: () => pendingSender.promise,
+        close() { connectionCloses++ }
+    }
+    const fixture = await connectedRecoveryFixture({
+        renderer,
+        recoveryClients: [
+            recoveryProbe({ available: true, health: health() }),
+            connection
+        ]
+    })
+
+    fixture.initial.completion.reject(senderLoss(1006))
+    await flushMicrotasks()
+    fixture.timers.fireTimeout(250)
+    await flushMicrotasks(12)
+    await fixture.controller.stop()
+
+    assert.equal(recoveryQueueCloses, 1)
+    assert.equal(connectionCloses, 1)
+    pendingSender.resolve(replacement.sender)
+    await flushMicrotasks(12)
+    assert.equal(replacement.closeCalls, 1)
+    assert.equal(fixture.controller.state.status, 'ready')
+    assert.equal(fixture.timers.timeouts.size, 0)
+    assert.equal(fixture.timers.intervals.size, 0)
+})
+
+test('derives actionable target UI for disconnected, connected, and sending states', () => {
+    assert.equal(typeof syncOutput.deriveSyncOutputView, 'function')
+
+    assert.deepEqual(syncOutput.deriveSyncOutputView({ status: 'idle' }).action, {
+        kind: 'check',
+        label: 'Check again',
+        disabled: false
+    })
+    assert.deepEqual(syncOutput.deriveSyncOutputView({
+        status: 'unavailable',
+        error: {
+            code: 'SYNC_PERMISSION_REQUIRED',
+            message: 'Loopback network permission requires a user action'
+        }
+    }).action, {
+        kind: 'connect',
+        label: 'Connect Sync',
+        disabled: false
+    })
+    const connected = syncOutput.deriveSyncOutputView({
+        status: 'ready',
+        connected: true,
+        providerIds: ['ndi', 'spout']
+    })
+    assert.deepEqual(connected.action, {
+        kind: 'start',
+        label: 'Start sending',
+        disabled: false
+    })
+    assert.equal(connected.status, 'Connected to Sync. Start sending when ready.')
+
+    const sending = syncOutput.deriveSyncOutputView({
+        status: 'sending',
+        connected: true,
+        providerIds: ['ndi', 'spout'],
+        width: 1920,
+        height: 1080,
+        fps: 60,
+        stats: { sent: 12, droppedBusy: 2, droppedBackpressure: 4, failed: 1 }
+    })
+    assert.deepEqual(sending.action, {
+        kind: 'stop',
+        label: 'Stop sending',
+        disabled: false
+    })
+    assert.equal(sending.provider, 'NDI, Spout')
+    assert.equal(sending.format, '1920×1080 · 60 fps')
+    assert.deepEqual(sending.counters, { sent: 12, gpuBusy: 2, network: 4, failed: 1 })
+
+    const authenticationError = syncOutput.deriveSyncOutputView({
+        status: 'error',
+        error: {
+            code: 'SYNC_AUTHENTICATION',
+            message: 'rejected token super-secret-sentinel'
+        }
+    })
+    assert.equal(authenticationError.status, 'Sync rejected this pairing. Connect again to pair this origin.')
+    assert.equal(authenticationError.status.includes('super-secret-sentinel'), false)
+
+    const unknownError = syncOutput.deriveSyncOutputView({
+        status: 'error',
+        error: {
+            code: 'SYNC_FUTURE_ERROR',
+            message: 'future secret super-secret-sentinel'
+        }
+    })
+    assert.equal(unknownError.status, 'Sync could not continue. Check the companion and try again.')
+    assert.equal(unknownError.status.includes('super-secret-sentinel'), false)
+})
+
+test('delegates packaged HD4 origin trust to the Sync companion', () => {
+    assert.equal(typeof syncOutput.createSyncOutputConnectionProvider, 'function')
+    const provider = syncOutput.createSyncOutputConnectionProvider({
+        location: { protocol: 'app:', hostname: 'hd4' }
+    })
+    const client = provider.createClient()
+    assert.equal(typeof client.probe, 'function')
+    assert.equal(typeof client.connect, 'function')
+    client.close()
+})
+
+test('default connection provider injects only external transport beneath each real client', () => {
+    const constructions = []
+    class RecordingClient {
+        constructor(options) { constructions.push(options) }
+    }
+    const transport = {
+        fetch: async () => {},
+        WebSocket: class {},
+        permissions: null
+    }
+    const provider = syncOutput.createDefaultSyncConnectionProvider({
+        Client: RecordingClient,
+        transport
+    })
+    const token = '7'.repeat(64)
+
+    provider.createClient({ token })
+
+    assert.deepEqual(constructions, [{ ...transport, token }])
+})
+
+
+test('video reuses the current audio credential without pairing and preserves newer rotations', async () => {
+    let credential = Object.freeze({ token: 'audio-grant' })
+    const store = {
+        current: () => credential,
+        publish(token) { return credential = Object.freeze({ token }) },
+        clear(value) { if (value === credential) credential = undefined }
+    }
+    const options = []
+    const pending = deferred()
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        connectionProvider: {
+            credentialStore: store,
+            createClient(value) {
+                options.push(value)
+                return { connect: () => pending.promise, close() {} }
+            }
+        }
+    })
+    const connecting = controller.connect()
+    await flushMicrotasks(10)
+    store.publish('rotated-audio-grant')
+    pending.reject(Object.assign(new Error('denied'), { code: 'SYNC_AUTHENTICATION' }))
+    await assert.rejects(connecting, { code: 'SYNC_AUTHENTICATION' })
+    assert.deepEqual(options, [{ token: 'audio-grant' }])
+    assert.equal(store.current().token, 'rotated-audio-grant')
+    controller.dispose()
+})
+
+test('blocked iframe explains delegation while a live or recovering output remains stoppable', () => {
+    const policy = { status: 'blocked', feature: 'loopback-network' }
+    const ready = syncOutput.deriveSyncOutputView({ status: 'ready' }, { policy })
+    assert.equal(ready.action.disabled, true)
+    assert.match(ready.status, /embedding page/)
+    for (const status of ['sending', 'recovering']) {
+        const view = syncOutput.deriveSyncOutputView({ status }, { policy })
+        assert.equal(view.action.kind, 'stop')
+        assert.equal(view.action.disabled, false)
+    }
+})
+
+test('SyncOutputController accepts and retains injected logger', () => {
+    const customLogger = { warn() {}, error() {}, info() {} }
+    const defaultController = new syncOutput.SyncOutputController({ random: () => 0,
+        renderer: {},
+        getCanvas: () => ({}),
+        connectionProvider: { createClient: () => ({}) }
+    })
+    assert.equal(defaultController._logger, globalThis.console)
+
+    const customController = new syncOutput.SyncOutputController({ random: () => 0,
+        renderer: {},
+        getCanvas: () => ({}),
+        connectionProvider: { createClient: () => ({}) },
+        logger: customLogger
+    })
+    assert.equal(customController._logger, customLogger)
+})
+
+test('passes the sender backlog signal through the renderer sink', async () => {
+    const fixture = createFixture()
+    let backlog = false
+    fixture.sender.deferRender = () => backlog
+    const canvas = { width: 1280, height: 720 }
+    const controller = new syncOutput.SyncOutputController({ random: () => 0,
+        renderer: fixture.renderer,
+        getCanvas: () => canvas,
+        connectionProvider: fixture.connectionProvider
+    })
+
+    await controller.connect()
+    await controller.start('HD4 Backlog')
+
+    assert.equal(fixture.attachedSink.deferRender(), false)
+    backlog = true
+    assert.equal(fixture.attachedSink.deferRender(), true)
+    delete fixture.sender.deferRender
+    assert.equal(fixture.attachedSink.deferRender(), false)
+    await controller.stop()
+})
+
+test('SyncOutputController forwards injected logger to SyncH264CanvasSender.create', async () => {
+    const original = {
+        encoder: globalThis.VideoEncoder,
+        frame: globalThis.VideoFrame,
+        stream: globalThis.WebSocketStream,
+        create: SyncH264CanvasSender.create
+    }
+    const canvas = { width: 1920, height: 1080 }
+    const fixture = createFixture()
+    let capturedOptions
+    const customLogger = { warn() {}, error() {}, info() {} }
+    try {
+        globalThis.VideoEncoder = class VideoEncoder {}
+        globalThis.VideoFrame = class VideoFrame {}
+        globalThis.WebSocketStream = class WebSocketStream {}
+        SyncH264CanvasSender.create = async (options) => {
+            capturedOptions = options
+            return fixture.sender
+        }
+        let clientIndex = 0
+        const clients = [
+            {
+                async pair() { return { protocolVersion: 1, token: 'a'.repeat(64) } },
+                close() {}
+            },
+            {
+                async connect() { return welcome(['syphon'], '0.2.87') },
+                async createSender() { return fixture.sender },
+                close() {}
+            }
+        ]
+        const controller = new syncOutput.SyncOutputController({ random: () => 0,
+            renderer: fixture.renderer,
+            getCanvas: () => canvas,
+            connectionProvider: { createClient: () => clients[clientIndex++] },
+            logger: customLogger,
+            clock: { timeOrigin: 1_700_000_000_000 },
+            setInterval: () => 1,
+            clearInterval: () => {},
+            setTimeout: () => 2,
+            clearTimeout: () => {}
+        })
+
+        await controller.connect()
+        await controller.start('Logger forwarding test')
+        assert.equal(capturedOptions?.logger, customLogger)
+        await controller.stop()
+    } finally {
+        globalThis.VideoEncoder = original.encoder
+        globalThis.VideoFrame = original.frame
+        globalThis.WebSocketStream = original.stream
+        SyncH264CanvasSender.create = original.create
+    }
+})
+
+test('an encoder timeout under load recovers instead of ending the output', async () => {
+    const fixture = await connectedRecoveryFixture({
+        recoveryClients: [recoveryProbe({ available: false, code: 'SYNC_UNAVAILABLE' })]
+    })
+    const timeout = new Error('H.264 frame encoding timed out')
+    timeout.code = 'SYNC_ENCODING_FAILED'
+    timeout.transient = true
+    fixture.initial.completion.reject(timeout)
+    await flushMicrotasks()
+
+    assert.equal(fixture.controller.state.status, 'recovering')
+    assert.equal(fixture.controller.state.error, null)
+    assert.equal(fixture.controller._lastRecoveryCause.code, 'SYNC_ENCODING_FAILED')
+    assert.equal(fixture.timers.timeouts.size, 1, 'the first recovery attempt is scheduled')
+})
+
+test('a transient encoder warmup timeout during start retries and succeeds', async () => {
+    const original = {
+        encoder: globalThis.VideoEncoder,
+        frame: globalThis.VideoFrame,
+        stream: globalThis.WebSocketStream,
+        create: SyncH264CanvasSender.create
+    }
+    const sender = senderFixture()
+    let attempts = 0
+    try {
+        globalThis.VideoEncoder = class VideoEncoder {}
+        globalThis.VideoFrame = class VideoFrame {}
+        globalThis.WebSocketStream = class WebSocketStream {}
+        SyncH264CanvasSender.create = async () => {
+            attempts++
+            if (attempts === 1) {
+                const timeout = new Error('H.264 hardware encoder warmup timed out')
+                timeout.code = 'SYNC_ENCODING_FAILED'
+                timeout.transient = true
+                throw timeout
+            }
+            return sender.sender
+        }
+        const timers = manualTimers()
+        let clientIndex = 0
+        const clients = [
+            {
+                async pair() { return { protocolVersion: 1, token: '9'.repeat(64) } },
+                close() {}
+            },
+            {
+                async connect() { return welcome(['syphon'], '0.2.87') },
+                async createSender() { return sender.sender },
+                close() {}
+            }
+        ]
+        const canvas = { width: 1280, height: 720 }
+        const controller = new syncOutput.SyncOutputController({ random: () => 0,
+            renderer: { pipeline: {}, addSink: () => () => sender.sender.close() },
+            getCanvas: () => canvas,
+            connectionProvider: { createClient: () => clients[clientIndex++] },
+            setInterval: timers.setInterval,
+            clearInterval: timers.clearInterval,
+            setTimeout: timers.setTimeout,
+            clearTimeout: timers.clearTimeout
+        })
+        await controller.connect()
+        const starting = controller.start('WarmupRetry')
+        await flushMicrotasks(12)
+
+        assert.equal(attempts, 1)
+        assert.equal(controller.state.status, 'starting')
+        assert.equal(timers.timeouts.size, 1, 'retry timeout scheduled')
+
+        timers.fireTimeout(250)
+        await starting
+        assert.equal(attempts, 2)
+        assert.equal(controller.state.status, 'sending')
+        assert.equal(timers.timeouts.size, 0)
+    } finally {
+        globalThis.VideoEncoder = original.encoder
+        globalThis.VideoFrame = original.frame
+        globalThis.WebSocketStream = original.stream
+        SyncH264CanvasSender.create = original.create
+    }
+})
+
+test('a persistent encoder warmup timeout during start fails after exhausting retries', async () => {
+    const original = {
+        encoder: globalThis.VideoEncoder,
+        frame: globalThis.VideoFrame,
+        stream: globalThis.WebSocketStream,
+        create: SyncH264CanvasSender.create
+    }
+    let attempts = 0
+    try {
+        globalThis.VideoEncoder = class VideoEncoder {}
+        globalThis.VideoFrame = class VideoFrame {}
+        globalThis.WebSocketStream = class WebSocketStream {}
+        SyncH264CanvasSender.create = async () => {
+            attempts++
+            const timeout = new Error('H.264 hardware encoder warmup timed out')
+            timeout.code = 'SYNC_ENCODING_FAILED'
+            timeout.transient = true
+            throw timeout
+        }
+        const timers = manualTimers()
+        let clientIndex = 0
+        const clients = [
+            {
+                async pair() { return { protocolVersion: 1, token: '9'.repeat(64) } },
+                close() {}
+            },
+            {
+                async connect() { return welcome(['syphon'], '0.2.87') },
+                async createSender() { return {} },
+                close() {}
+            }
+        ]
+        const canvas = { width: 1280, height: 720 }
+        const controller = new syncOutput.SyncOutputController({ random: () => 0,
+            renderer: { pipeline: {}, addSink: () => () => {} },
+            getCanvas: () => canvas,
+            connectionProvider: { createClient: () => clients[clientIndex++] },
+            setInterval: timers.setInterval,
+            clearInterval: timers.clearInterval,
+            setTimeout: timers.setTimeout,
+            clearTimeout: timers.clearTimeout
+        })
+        await controller.connect()
+        const starting = controller.start('WarmupPersistent')
+        await flushMicrotasks(12)
+
+        assert.equal(attempts, 1)
+        assert.equal(timers.timeouts.size, 1)
+        timers.fireTimeout(250)
+        await flushMicrotasks(12)
+
+        assert.equal(attempts, 2)
+        assert.equal(timers.timeouts.size, 1)
+        timers.fireTimeout(1000)
+        await flushMicrotasks(12)
+
+        assert.equal(attempts, 3)
+        await assert.rejects(starting, {
+            code: 'SYNC_ENCODING_FAILED'
+        })
+        assert.equal(controller.state.status, 'error')
+        assert.equal(timers.timeouts.size, 0)
+    } finally {
+        globalThis.VideoEncoder = original.encoder
+        globalThis.VideoFrame = original.frame
+        globalThis.WebSocketStream = original.stream
+        SyncH264CanvasSender.create = original.create
+    }
+})
+
+test('dispose during start retry cancels the retry timer and rejects with SYNC_LIFECYCLE', async () => {
+    const original = {
+        encoder: globalThis.VideoEncoder,
+        frame: globalThis.VideoFrame,
+        stream: globalThis.WebSocketStream,
+        create: SyncH264CanvasSender.create
+    }
+    let attempts = 0
+    try {
+        globalThis.VideoEncoder = class VideoEncoder {}
+        globalThis.VideoFrame = class VideoFrame {}
+        globalThis.WebSocketStream = class WebSocketStream {}
+        SyncH264CanvasSender.create = async () => {
+            attempts++
+            const timeout = new Error('H.264 hardware encoder warmup timed out')
+            timeout.code = 'SYNC_ENCODING_FAILED'
+            timeout.transient = true
+            throw timeout
+        }
+        const timers = manualTimers()
+        let clientIndex = 0
+        const clients = [
+            {
+                async pair() { return { protocolVersion: 1, token: '9'.repeat(64) } },
+                close() {}
+            },
+            {
+                async connect() { return welcome(['syphon'], '0.2.87') },
+                async createSender() { return {} },
+                close() {}
+            }
+        ]
+        const canvas = { width: 1280, height: 720 }
+        const controller = new syncOutput.SyncOutputController({ random: () => 0,
+            renderer: { pipeline: {}, addSink: () => () => {} },
+            getCanvas: () => canvas,
+            connectionProvider: { createClient: () => clients[clientIndex++] },
+            setInterval: timers.setInterval,
+            clearInterval: timers.clearInterval,
+            setTimeout: timers.setTimeout,
+            clearTimeout: timers.clearTimeout
+        })
+        await controller.connect()
+        const starting = controller.start('WarmupDispose')
+        await flushMicrotasks(12)
+
+        assert.equal(attempts, 1)
+        assert.equal(timers.timeouts.size, 1)
+
+        controller.dispose()
+        assert.equal(timers.timeouts.size, 0)
+        await assert.rejects(starting, {
+            code: 'SYNC_LIFECYCLE'
+        })
+        assert.equal(controller.state.status, 'idle')
+    } finally {
+        globalThis.VideoEncoder = original.encoder
+        globalThis.VideoFrame = original.frame
+        globalThis.WebSocketStream = original.stream
+        SyncH264CanvasSender.create = original.create
+    }
+})
+
+test('an encoding failure that is not a timeout still ends the output', async () => {
+    const fixture = await connectedRecoveryFixture()
+    const fatal = new Error('Fatal encode error')
+    fatal.code = 'SYNC_ENCODING_FAILED'
+    fixture.initial.completion.reject(fatal)
+    await flushMicrotasks()
+
+    assert.equal(fixture.controller.state.status, 'error')
+    assert.equal(fixture.controller.state.error.code, 'SYNC_SENDER_CLOSED')
+    assert.equal(fixture.timers.timeouts.size, 0)
+})
+
+test('initializes one passive app singleton without probing, pairing, connecting, or UI', () => {
+    const calls = []
+    const connectionProvider = {
+        createClient() {
+            calls.push('createClient')
+            throw new Error('singleton initialization must stay passive')
+        }
+    }
+    const renderer = {
+        createFrameExportQueue() {},
+        addSink() {}
+    }
+    const canvas = { width: 1024, height: 1024 }
+
+    const first = syncOutput.initializeSyncOutputController({
+        renderer,
+        getCanvas: () => canvas,
+        connectionProvider
+    })
+    const second = syncOutput.initializeSyncOutputController({
+        renderer: null,
+        getCanvas: () => null,
+        connectionProvider
+    })
+
+    assert.equal(first, second)
+    assert.equal(syncOutput.getSyncOutputController(), first)
+    assert.equal(first.state.status, 'idle')
+    assert.deepEqual(calls, [])
+    assert.equal('document' in first, false)
+    assert.equal(globalThis.syncOutputController, undefined)
+    assert.equal(globalThis._testExports?.syncOutputController, undefined)
+})
+
+test('initializes a fresh singleton when the previous instance has been disposed', () => {
+    const first = syncOutput.initializeSyncOutputController({
+        renderer: { pipeline: {} },
+        getCanvas: () => ({}),
+        connectionProvider: { createClient: () => ({}) }
+    })
+    first.dispose()
+
+    const second = syncOutput.initializeSyncOutputController({
+        renderer: { pipeline: {} },
+        getCanvas: () => ({}),
+        connectionProvider: { createClient: () => ({}) }
+    })
+
+    assert.notEqual(first, second)
+    assert.equal(syncOutput.getSyncOutputController(), second)
+    assert.equal(second.state.status, 'idle')
+})
+
+test('applyBackoffJitter keeps the exact base delay with a zero random source', () => {
+    for (const base of [250, 1000, 4000, 10_000]) {
+        assert.equal(syncOutput.applyBackoffJitter(base, () => 0), base)
+    }
+})
+
+test('applyBackoffJitter stays within +25% of the base delay', () => {
+    for (const base of [250, 1000, 4000, 10_000]) {
+        for (const sample of [0, 0.5, 0.999]) {
+            const delay = syncOutput.applyBackoffJitter(base, () => sample)
+            const spread = Math.round(base * 0.25)
+            assert.ok(delay >= base && delay <= base + spread,
+                `${delay} expected within [${base}, ${base + spread}]`)
+        }
+    }
+})
+
+test('applyBackoffJitter never shortens the base delay across a random sweep', () => {
+    let previous = 0
+    let sawVariation = false
+    for (let index = 0; index <= 10; index++) {
+        const delay = syncOutput.applyBackoffJitter(1000, () => index / 10)
+        assert.ok(delay >= 1000 && delay <= 1250)
+        if (previous && delay !== previous) sawVariation = true
+        previous = delay
+    }
+    assert.equal(sawVariation, true)
+})
+
+test('applyBackoffJitter guards against invalid delays and random sources', () => {
+    assert.equal(syncOutput.applyBackoffJitter(0, () => 0.9), 0)
+    assert.equal(syncOutput.applyBackoffJitter(-5, () => 0.9), 0)
+    assert.equal(syncOutput.applyBackoffJitter(Number.NaN, () => 0.9), 0)
+    // A non-function random source falls back to zero jitter.
+    assert.equal(syncOutput.applyBackoffJitter(1000, null), 1000)
+    assert.equal(syncOutput.applyBackoffJitter(1000, () => Number.NaN), 1000)
+})
+
+test('recovery backoff timers carry jitter while remaining within the ramp bounds', async () => {
+    const replacement = senderFixture()
+    const timers = manualTimers()
+    const fixture = await connectedRecoveryFixture({
+        random: () => 1,
+        timers,
+        recoveryClients: [
+            recoveryProbe({ available: false, code: 'SYNC_UNAVAILABLE' }),
+            recoveryConnection({ sender: replacement.sender })
+        ]
+    })
+
+    fixture.initial.completion.reject(senderLoss(1006))
+    await flushMicrotasks()
+    const scheduled = [...timers.timeouts.values()].map((timer) => timer.delay)
+    assert.equal(scheduled.length, 1)
+    const spread = Math.round(250 * 0.25)
+    assert.ok(scheduled[0] > 250 && scheduled[0] <= 250 + spread,
+        `jittered delay ${scheduled[0]} expected in (250, ${250 + spread}]`)
+    // The probe fails, so the next recovery attempt schedules again with the
+    // same deterministic random source above the base 1000ms ramp delay.
+    timers.fireTimeout(scheduled[0])
+    await flushMicrotasks(12)
+    assert.equal(fixture.controller.state.status, 'recovering')
+    const next = [...timers.timeouts.values()].map((timer) => timer.delay)
+    assert.equal(next.length, 1)
+    assert.ok(next[0] > 1000 && next[0] <= 1250,
+        `jittered delay ${next[0]} expected in (1000, 1250]`)
+    await fixture.controller.stop()
+})

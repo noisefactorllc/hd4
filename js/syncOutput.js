@@ -1,0 +1,1609 @@
+// SPDX-License-Identifier: MIT
+import { SyncBridgeClient } from './sync/bundle.js'
+import { syncCredentialStore } from './sync/credentials.js'
+import { SyncH264CanvasSender, supportsH264CanvasOutput } from './syncH264CanvasSender.js'
+
+const MAX_SENDER_NAME_BYTES = 64
+const RGBA8_BYTES_PER_PIXEL = 4
+const MAX_V1_PAYLOAD_BYTES = 0xffffffff
+const STATS_INTERVAL_MS = 250
+const STOP_TIMEOUT_MS = 3000
+const RECOVERY_DELAYS_MS = Object.freeze([250, 1000, 4000])
+// Continue retryable transport recovery until stopped by the operator.
+const RECOVERY_SUSTAINED_DELAY_MS = 10_000
+// Up to +25% randomized jitter on recovery backoff delays so that multiple
+// HD4 instances recovering against one Sync companion do not retry in
+// a synchronized thundering herd.
+const BACKOFF_JITTER_FRACTION = 0.25
+
+export function applyBackoffJitter(delayMs, random = Math.random) {
+    const base = Math.max(0, delayMs)
+    if (!Number.isFinite(base)) return 0
+    const spread = Math.round(base * BACKOFF_JITTER_FRACTION)
+    if (spread <= 0) return base
+    const sample = typeof random === 'function' ? random() : 0
+    const bounded = Number.isFinite(sample) ? Math.min(Math.max(sample, 0), 1) : 0
+    return base + Math.ceil(bounded * spread)
+}
+
+const RECOVERY_PROBATION_MS = 60_000
+const RECOVERY_CANCELLED = Symbol('sync recovery cancelled')
+const textEncoder = new TextEncoder()
+const FORMATTING_CHARACTERS = /\p{Cf}/u
+const EMPTY_STATS = Object.freeze({
+    accepted: 0,
+    droppedBusy: 0,
+    droppedBackpressure: 0,
+    sent: 0,
+    failed: 0
+})
+const EMPTY_PROVIDER_IDS = Object.freeze([])
+const INITIAL_STATE = Object.freeze({
+    status: 'idle',
+    available: null,
+    connected: false,
+    providerIds: EMPTY_PROVIDER_IDS,
+    senderName: null,
+    width: null,
+    height: null,
+    fps: 60,
+    stats: EMPTY_STATS,
+    error: null
+})
+
+export function createDefaultSyncConnectionProvider({
+    Client = SyncBridgeClient,
+    credentialStore = syncCredentialStore,
+    transport = {}
+} = {}) {
+    if (typeof Client !== 'function') {
+        throw new TypeError('Client must be a constructor')
+    }
+    if (!credentialStore || !['current', 'publish', 'clear'].every(key => typeof credentialStore[key] === 'function')) {
+        throw new TypeError('credentialStore must manage Sync credentials')
+    }
+    if (!transport || typeof transport !== 'object' || Array.isArray(transport)) {
+        throw new TypeError('transport must be an object')
+    }
+    const clientTransport = {}
+    for (const key of ['fetch', 'WebSocket', 'permissions']) {
+        if (Object.hasOwn(transport, key)) clientTransport[key] = transport[key]
+    }
+    return Object.freeze({
+        credentialStore,
+        createClient(options = {}) {
+            return new Client({ ...clientTransport, ...options })
+        }
+    })
+}
+
+export function createSyncOutputConnectionProvider({
+    connectionProvider,
+    transport
+} = {}) {
+    if (connectionProvider !== undefined) return connectionProvider
+    return createDefaultSyncConnectionProvider({ transport })
+}
+
+function publicError(code, message) {
+    return Object.freeze({
+        code: typeof code === 'string' && code ? code : 'SYNC_UNAVAILABLE',
+        message: typeof message === 'string' && message ? message : 'Sync is unavailable'
+    })
+}
+
+function outputError(code, message, options = {}) {
+    const error = new Error(message, options.cause === undefined ? undefined : { cause: options.cause })
+    error.name = 'SyncOutputError'
+    error.code = code
+    return error
+}
+
+function lifecycleError() {
+    return outputError('SYNC_LIFECYCLE', 'Sync output controller was disposed')
+}
+
+function rendererReplacedError(options = {}) {
+    return outputError(
+        'SYNC_RENDERER_REPLACED',
+        'Renderer backend or context was replaced; start Sync output again',
+        options
+    )
+}
+
+function isWellFormedUnicode(value) {
+    for (let index = 0; index < value.length; index++) {
+        const code = value.charCodeAt(index)
+        if (code >= 0xd800 && code <= 0xdbff) {
+            const next = value.charCodeAt(++index)
+            if (!(next >= 0xdc00 && next <= 0xdfff)) return false
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+            return false
+        }
+    }
+    return true
+}
+
+function hasControlCharacter(value) {
+    for (let index = 0; index < value.length; index++) {
+        const code = value.charCodeAt(index)
+        if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true
+    }
+    return false
+}
+
+function validateSenderName(name) {
+    if (typeof name !== 'string' || name.length === 0 || !isWellFormedUnicode(name) ||
+        textEncoder.encode(name).byteLength > MAX_SENDER_NAME_BYTES ||
+        hasControlCharacter(name) || FORMATTING_CHARACTERS.test(name)) {
+        throw outputError(
+            'SYNC_INVALID_SENDER_NAME',
+            'Sender name must be 1-64 UTF-8 bytes without control or formatting characters'
+        )
+    }
+}
+
+function validateDescriptor(descriptor) {
+    if (!descriptor || !Number.isSafeInteger(descriptor.width) || descriptor.width <= 0 ||
+        !Number.isSafeInteger(descriptor.height) || descriptor.height <= 0 ||
+        typeof descriptor.fps !== 'number' || !Number.isFinite(descriptor.fps) ||
+        descriptor.fps <= 0) {
+        throw outputError('SYNC_RENDERER_UNAVAILABLE', 'Renderer output dimensions are unavailable')
+    }
+    const payloadBytes = descriptor.width * descriptor.height * RGBA8_BYTES_PER_PIXEL
+    if (!Number.isSafeInteger(payloadBytes) || payloadBytes > MAX_V1_PAYLOAD_BYTES) {
+        throw outputError('SYNC_RENDERER_UNAVAILABLE', 'Renderer output dimensions exceed Sync v1 limits')
+    }
+    return Object.freeze({ ...descriptor })
+}
+
+function validateSender(sender) {
+    if (!sender || typeof sender.configure !== 'function' ||
+        typeof sender.submit !== 'function' || typeof sender.close !== 'function' ||
+        !sender.closed || typeof sender.closed.then !== 'function' ||
+        !sender.stats || typeof sender.stats !== 'object') {
+        throw outputError('SYNC_SENDER_INVALID', 'Sync returned an invalid sender sink')
+    }
+}
+
+function createConfiguredSink(sender, onConfigured) {
+    return Object.freeze({
+        configure(descriptor) {
+            const configuredDescriptor = validateDescriptor(descriptor)
+            const result = sender.configure(configuredDescriptor)
+            onConfigured(configuredDescriptor)
+            return result
+        },
+        submit(texture, timestamp) {
+            return sender.submit(texture, timestamp)
+        },
+        deferRender() {
+            return typeof sender.deferRender === 'function' && sender.deferRender() === true
+        },
+        close(options) {
+            return sender.close(options)
+        }
+    })
+}
+
+/**
+ * Every selected, available send provider id, in a stable (sorted) order so
+ * set equality and display are deterministic. Windows can report more than
+ * one at once (e.g. Spout and NDI publishing the same output); macOS today
+ * reports at most one (Syphon). Returns an empty array when none qualify.
+ */
+function selectedSendProviderIds(health) {
+    const providers = health?.capabilities?.providers
+    if (!Array.isArray(providers)) return EMPTY_PROVIDER_IDS
+    const ids = providers
+        .filter((provider) => (
+            provider?.direction === 'send' &&
+            provider.available === true &&
+            provider.selected === true &&
+            typeof provider.id === 'string' &&
+            provider.id.length > 0
+        ))
+        .map((provider) => provider.id)
+        .sort()
+    return Object.freeze(ids)
+}
+
+function sameProviderIdSet(left, right) {
+    return Array.isArray(left) && Array.isArray(right) &&
+        left.length === right.length &&
+        left.every((id, index) => id === right[index])
+}
+
+function descriptorsMatch(left, right) {
+    if (!left || !right) return false
+    const leftKeys = Object.keys(left).sort()
+    const rightKeys = Object.keys(right).sort()
+    return leftKeys.length === rightKeys.length &&
+        leftKeys.every((key, index) => key === rightKeys[index] && Object.is(left[key], right[key]))
+}
+
+function isRetryableRecoveryError(error) {
+    // One frame stuck past the encode deadline under heavy GPU load used to
+    // end the output until the user reconnected. Measured 2026-09-24 with a
+    // second 4K renderer on the GPU: the sender closed nine seconds in and the
+    // output stayed dark for the rest of the ten-minute run. Encoder warmup
+    // timed out under the same load, so a rebuild can fail the same way.
+    if (error?.code === 'SYNC_ENCODING_FAILED' && error.transient === true) return true
+    if (error?.code === 'SYNC_UNAVAILABLE' || error?.code === 'SYNC_TIMEOUT' ||
+        error?.code === 'SYNC_LIFECYCLE') {
+        return true
+    }
+    if (error?.code !== 'SYNC_SENDER_LOST') return false
+    const closeCode = Number.isInteger(error.closeCode) ? error.closeCode : null
+    return closeCode === null || closeCode === 1005 || closeCode === 1006 || closeCode === 1011 ||
+        closeCode === 1013 ||
+        (closeCode === 1008 && error.closeReason === 'incomplete_frame_timeout')
+}
+
+function fixedRecoveryError(error) {
+    const messages = Object.freeze({
+        SYNC_AUTHENTICATION: 'Sync authentication failed; connect again to pair',
+        SYNC_PERMISSION_REQUIRED: 'Loopback permission requires an explicit reconnect',
+        SYNC_PERMISSION_DENIED: 'Loopback permission was denied; reconnect after allowing access',
+        SYNC_PROVIDER_UNAVAILABLE: 'Sync has no selected available send providers',
+        SYNC_PROVIDER_REPLACED: 'The set of selected Sync providers changed; connect and start again',
+        SYNC_PROTOCOL: 'Sync returned an invalid recovery response; connect and start again',
+        SYNC_CAPABILITY: 'Sync no longer exposes the required sender capability',
+        SYNC_CONFIGURATION: 'Sync recovery configuration is invalid',
+        SYNC_RENDERER_REPLACED: 'Renderer backend or context was replaced; start Sync output again',
+        SYNC_SENDER_CLOSED: 'Sync sender connection closed; connect and start again'
+    })
+    const originalCode = typeof error?.code === 'string' ? error.code : 'SYNC_SENDER_CLOSED'
+    const code = originalCode === 'SYNC_SENDER_LOST' ? 'SYNC_SENDER_CLOSED' : originalCode
+    return publicError(
+        code,
+        messages[code] || 'Sync output stopped after a non-recoverable connection failure'
+    )
+}
+
+export class SyncOutputController {
+    constructor({
+        renderer = null,
+        getCanvas = () => null,
+        getDescriptor,
+        connectionProvider = createDefaultSyncConnectionProvider(),
+        clock = globalThis.performance,
+        logger = globalThis.console,
+        setInterval: setIntervalImplementation = globalThis.setInterval,
+        clearInterval: clearIntervalImplementation = globalThis.clearInterval,
+        setTimeout: setTimeoutImplementation = globalThis.setTimeout,
+        clearTimeout: clearTimeoutImplementation = globalThis.clearTimeout,
+        random = Math.random,
+        onStateChange = () => {}
+    } = {}) {
+        if (!connectionProvider || typeof connectionProvider.createClient !== 'function') {
+            throw new TypeError('connectionProvider must expose createClient(options)')
+        }
+        if (typeof onStateChange !== 'function') {
+            throw new TypeError('onStateChange must be a function')
+        }
+        if (typeof getCanvas !== 'function') throw new TypeError('getCanvas must be a function')
+        if (getDescriptor !== undefined && typeof getDescriptor !== 'function') {
+            throw new TypeError('getDescriptor must be a function')
+        }
+        if (typeof random !== 'function') throw new TypeError('random must be a function')
+
+        this._renderer = renderer
+        this._getCanvas = getCanvas
+        this._getDescriptor = getDescriptor
+        this._connectionProvider = connectionProvider
+        this._clock = clock
+        this._logger = logger
+        this._random = random
+        this._setInterval = (...args) => Reflect.apply(setIntervalImplementation, globalThis, args)
+        this._clearInterval = (...args) => Reflect.apply(clearIntervalImplementation, globalThis, args)
+        this._setTimeout = (...args) => Reflect.apply(setTimeoutImplementation, globalThis, args)
+        this._clearTimeout = (...args) => Reflect.apply(clearTimeoutImplementation, globalThis, args)
+        this._listeners = new Set([onStateChange])
+        this._state = INITIAL_STATE
+        this._disposed = false
+        this._operationGeneration = 0
+        this._operation = null
+        this._passiveOperation = null
+        this._ownedClients = new Set()
+        this._startResources = null
+        this._credentialStore = connectionProvider.credentialStore ?? null
+        this._credential = undefined
+        this._client = null
+        this._welcome = null
+        this._sender = null
+        this._exportQueue = null
+        this._removeSink = null
+        this._statsTimer = null
+        this._liveGeneration = 0
+        this._stoppingGeneration = 0
+        this._liveCanvas = null
+        this._liveDescriptor = null
+        this._livePipeline = null
+        this._compressedSender = false
+        this._recoveryGeneration = 0
+        this._lastRecoveryCause = null
+        this._recoveryAttempts = 0
+        this._recoveryTimer = null
+        this._recoveryProbationTimer = null
+        this._recoveryContext = null
+        this._recoveryResources = null
+    }
+
+    get state() {
+        return this._state
+    }
+
+    subscribe(listener) {
+        if (typeof listener !== 'function') throw new TypeError('listener must be a function')
+        this._listeners.add(listener)
+        try { listener(this._state) } catch {
+            // View listeners are isolated from controller ownership.
+        }
+        let subscribed = true
+        return () => {
+            if (!subscribed) return
+            subscribed = false
+            this._listeners.delete(listener)
+        }
+    }
+
+    checkAvailability() {
+        if (this._disposed) return Promise.reject(lifecycleError())
+        if (this._state.status === 'recovering') return Promise.resolve(this._state)
+        if (this._operation) return this._operation
+        if (this._client || this._sender) return Promise.resolve(this._state)
+
+        this._setState({
+            status: 'checking',
+            available: null,
+            connected: false,
+            providerIds: EMPTY_PROVIDER_IDS,
+            error: null
+        })
+
+        const operation = this._runPassiveCheck(this._operationGeneration)
+        const tracked = operation.finally(() => {
+            if (this._operation === tracked) this._operation = null
+            if (this._passiveOperation === tracked) this._passiveOperation = null
+        })
+        this._operation = tracked
+        this._passiveOperation = tracked
+        return tracked
+    }
+
+    connect() {
+        if (this._disposed) return Promise.reject(lifecycleError())
+        if (this._state.status === 'recovering') return Promise.resolve(this._state)
+        if (this._operation) {
+            const operation = this._operation
+            return operation === this._passiveOperation
+                ? operation.then(() => this.connect())
+                : operation
+        }
+        if (this._client) return Promise.resolve(this._state)
+
+        this._setState({
+            status: 'checking',
+            available: null,
+            connected: false,
+            providerIds: EMPTY_PROVIDER_IDS,
+            error: null
+        })
+
+        const operation = this._runExplicitConnect(this._operationGeneration)
+        const tracked = operation.finally(() => {
+            if (this._operation === tracked) this._operation = null
+        })
+        this._operation = tracked
+        return tracked
+    }
+
+    start(name) {
+        if (this._disposed) return Promise.reject(lifecycleError())
+        if (this._state.status === 'recovering') return Promise.resolve(this._state)
+        if (this._operation) return this._operation
+        if (this._state.status === 'sending') return Promise.resolve(this._state)
+
+        try {
+            validateSenderName(name)
+        } catch (error) {
+            this._setState({
+                status: 'error',
+                error: publicError(error.code, error.message)
+            })
+            return Promise.reject(error)
+        }
+
+        const operation = this._runStart(name, this._operationGeneration)
+        const tracked = operation.finally(() => {
+            if (this._operation === tracked) this._operation = null
+        })
+        this._operation = tracked
+        return tracked
+    }
+
+    stop() {
+        if (this._disposed) return Promise.resolve(this._state)
+        if (this._state.status === 'recovering') {
+            this._cancelRecovery({ resetAttempts: true })
+            this._setState({
+                status: 'ready',
+                connected: false,
+                senderName: null,
+                error: null
+            })
+            return Promise.resolve(this._state)
+        }
+        if (this._operation) return this._operation
+        if (this._state.status !== 'sending' || !this._sender) {
+            return Promise.resolve(this._state)
+        }
+
+        const generation = this._liveGeneration
+        this._stoppingGeneration = generation
+        this._setState({ status: 'stopping', error: null })
+
+        const operation = this._runStop(generation)
+        const tracked = operation.finally(() => {
+            if (this._operation === tracked) this._operation = null
+        })
+        this._operation = tracked
+        return tracked
+    }
+
+    dispose() {
+        if (this._disposed) return
+        this._disposed = true
+        this._operationGeneration++
+        this._cancelRecovery({ resetAttempts: true })
+        this._clearStatsTimer()
+        this._cleanupStartResources(this._startResources)
+        this._startResources = null
+
+        const generation = this._liveGeneration
+        const removeSink = this._removeSink
+        const sender = this._sender
+        this._removeSink = null
+        try {
+            if (typeof removeSink === 'function') removeSink()
+            else sender?.close()
+        } catch {
+            try { sender?.close() } catch {
+                // Page lifecycle teardown remains best effort across every resource.
+            }
+        }
+        this._invalidateLiveSession(generation)
+        this._releaseClient()
+        for (const client of [...this._ownedClients]) this._closeOwnedClient(client)
+
+        this._operation = null
+        this._passiveOperation = null
+        this._state = Object.freeze({
+            ...this._state,
+            status: 'idle',
+            connected: false,
+            senderName: null,
+            stats: EMPTY_STATS,
+            error: null
+        })
+        this._listeners.clear()
+    }
+
+    _createOwnedClient(options, lifecycleGeneration) {
+        const clientOrPromise = this._connectionProvider.createClient(options)
+        if (clientOrPromise && typeof clientOrPromise.then === 'function') {
+            return clientOrPromise.then((client) => this._trackOwnedClient(client, lifecycleGeneration))
+        }
+        return this._trackOwnedClient(clientOrPromise, lifecycleGeneration)
+    }
+
+    _trackOwnedClient(client, lifecycleGeneration) {
+        if (this._disposed || (lifecycleGeneration !== undefined && lifecycleGeneration !== this._operationGeneration)) {
+            try { client?.close?.() } catch {
+                // A late client is already outside the active lifecycle.
+            }
+            throw lifecycleError()
+        }
+        this._ownedClients.add(client)
+        return client
+    }
+
+    _assertLifecycleCurrent(lifecycleGeneration) {
+        if (this._disposed || lifecycleGeneration !== this._operationGeneration) {
+            throw lifecycleError()
+        }
+    }
+
+    _closeOwnedClient(client) {
+        if (!client || !this._ownedClients.delete(client)) return null
+        try {
+            client.close?.()
+            return null
+        } catch (error) {
+            return error
+        }
+    }
+
+    _cleanupStartResources(resources) {
+        const removeSink = resources?.removeSink
+        if (resources) resources.removeSink = null
+        try { removeSink?.() } catch {
+            // Continue releasing the sender or queue after an attachment failure.
+        }
+
+        const sender = resources?.sender
+        if (resources) {
+            resources.sender = null
+            if (sender) resources.queue = null
+        }
+        try { sender?.close() } catch {
+            // Continue releasing an unowned export queue.
+        }
+
+        if (resources?.retryTimer) {
+            this._clearTimeout(resources.retryTimer)
+            resources.retryTimer = null
+        }
+        if (resources?.retryReject) {
+            const reject = resources.retryReject
+            resources.retryReject = null
+            reject(lifecycleError())
+        }
+
+        const queue = resources?.queue
+        if (resources) resources.queue = null
+        try { queue?.close() } catch {
+            // Lifecycle cleanup is best effort across every resource.
+        }
+    }
+
+    async _runPassiveCheck(lifecycleGeneration) {
+        let client
+        try {
+            client = await this._createOwnedClient({}, lifecycleGeneration)
+            if (!client || typeof client.probe !== 'function' || typeof client.close !== 'function') {
+                throw new TypeError('connectionProvider client must expose probe() and close()')
+            }
+
+            const result = await client.probe()
+            this._assertLifecycleCurrent(lifecycleGeneration)
+            if (result?.available === true) {
+                const providerIds = selectedSendProviderIds(result.health)
+                if (providerIds.length > 0) {
+                    this._setState({
+                        status: 'ready',
+                        available: true,
+                        connected: false,
+                        providerIds,
+                        error: null
+                    })
+                    return this._state
+                }
+                this._setState({
+                    status: 'unavailable',
+                    available: true,
+                    connected: false,
+                    providerIds: EMPTY_PROVIDER_IDS,
+                    error: publicError(
+                        'SYNC_PROVIDER_UNAVAILABLE',
+                        'Sync has no selected available send providers'
+                    )
+                })
+                return this._state
+            }
+
+            this._setState({
+                status: 'unavailable',
+                available: false,
+                connected: false,
+                providerIds: EMPTY_PROVIDER_IDS,
+                error: publicError(result?.code, result?.message)
+            })
+            return this._state
+        } catch (error) {
+            if (error?.code === 'SYNC_LIFECYCLE') throw error
+            this._setState({
+                status: 'unavailable',
+                available: false,
+                connected: false,
+                providerIds: EMPTY_PROVIDER_IDS,
+                error: publicError(error?.code, error?.message)
+            })
+            return this._state
+        } finally {
+            this._closeOwnedClient(client)
+        }
+    }
+
+    async _runExplicitConnect(lifecycleGeneration) {
+        let client
+        let credential
+        try {
+            credential = this._currentCredential()
+            if (!credential) {
+                const token = await this._pair(lifecycleGeneration)
+                this._assertLifecycleCurrent(lifecycleGeneration)
+                credential = this._publishCredential(token)
+            }
+
+            client = await this._createOwnedClient({ token: credential.token }, lifecycleGeneration)
+            if (!client || typeof client.connect !== 'function' || typeof client.close !== 'function') {
+                throw new TypeError('authenticated Sync client must expose connect() and close()')
+            }
+
+            const welcome = await client.connect()
+            this._assertLifecycleCurrent(lifecycleGeneration)
+            const providerIds = selectedSendProviderIds(welcome)
+            if (providerIds.length === 0) {
+                const error = new Error('Sync has no selected available send providers')
+                error.code = 'SYNC_PROVIDER_UNAVAILABLE'
+                throw error
+            }
+
+            this._client = client
+            this._welcome = welcome
+            this._setState({
+                status: 'ready',
+                available: true,
+                connected: true,
+                providerIds,
+                error: null
+            })
+            return this._state
+        } catch (error) {
+            this._closeOwnedClient(client)
+            if (error?.code === 'SYNC_LIFECYCLE') throw error
+            let reportedError = error
+            if (error?.code === 'SYNC_AUTHENTICATION') {
+                this._clearCredential(credential)
+                reportedError = outputError(
+                    'SYNC_AUTHENTICATION',
+                    'Sync authentication failed; connect again to pair'
+                )
+            }
+            this._client = null
+            this._welcome = null
+            this._setState({
+                status: 'error',
+                available: error?.code !== 'SYNC_UNAVAILABLE',
+                connected: false,
+                providerIds: EMPTY_PROVIDER_IDS,
+                error: publicError(reportedError?.code, reportedError?.message)
+            })
+            throw reportedError
+        }
+    }
+
+    async _pair(lifecycleGeneration) {
+        let pairingClient
+        try {
+            pairingClient = await this._createOwnedClient({}, lifecycleGeneration)
+            if (!pairingClient || typeof pairingClient.pair !== 'function' ||
+                typeof pairingClient.close !== 'function') {
+                throw new TypeError('pairing Sync client must expose pair() and close()')
+            }
+            const result = await pairingClient.pair('HD4')
+            this._assertLifecycleCurrent(lifecycleGeneration)
+            if (!result || typeof result.token !== 'string' || result.token.length === 0) {
+                const error = new Error('Sync pairing did not return a token')
+                error.code = 'SYNC_PROTOCOL'
+                throw error
+            }
+            return result.token
+        } finally {
+            this._closeOwnedClient(pairingClient)
+        }
+    }
+
+    async _runStart(name, lifecycleGeneration) {
+        const resources = {
+            queue: null,
+            sender: null,
+            removeSink: null
+        }
+        this._startResources = resources
+        let configuredDescriptor
+        let sinkGeneration = null
+        try {
+            this._assertLifecycleCurrent(lifecycleGeneration)
+            if (!this._client || !this._welcome) {
+                throw outputError('SYNC_NOT_CONNECTED', 'Connect Sync before starting an output')
+            }
+            const compressed = supportsH264CanvasOutput(this._welcome)
+            if (typeof this._renderer?.addSink !== 'function' ||
+                (!compressed && typeof this._renderer?.createFrameExportQueue !== 'function')) {
+                throw outputError(
+                    'SYNC_RENDERER_UNAVAILABLE',
+                    'This renderer does not support Sync output'
+                )
+            }
+            const providerIds = selectedSendProviderIds(this._welcome)
+            if (providerIds.length === 0) {
+                throw outputError(
+                    'SYNC_PROVIDER_UNAVAILABLE',
+                    'Sync has no selected available send providers'
+                )
+            }
+            if (typeof this._client.createSender !== 'function') {
+                throw outputError('SYNC_CLIENT_INVALID', 'Sync client cannot create senders')
+            }
+
+            const liveCanvas = this._getCanvas()
+            const descriptor = this._readDescriptor(liveCanvas)
+            this._setState({
+                status: 'starting',
+                available: true,
+                connected: true,
+                providerIds,
+                senderName: name,
+                width: descriptor.width,
+                height: descriptor.height,
+                fps: descriptor.fps,
+                stats: EMPTY_STATS,
+                error: null
+            })
+
+            const rendererIdentity = this._captureRendererIdentity(liveCanvas, descriptor)
+            const maxAttempts = 3
+            for (let attempt = 1; ; attempt++) {
+                try {
+                    this._assertLifecycleCurrent(lifecycleGeneration)
+                    this._assertRendererIdentity(rendererIdentity)
+                    if (compressed) {
+                        resources.sender = await SyncH264CanvasSender.create({
+                            client: this._client,
+                            name,
+                            canvas: liveCanvas,
+                            descriptor,
+                            clock: this._clock,
+                            logger: this._logger
+                        })
+                    } else {
+                        resources.queue = this._renderer.createFrameExportQueue({ slots: 3 })
+                        if (!resources.queue) {
+                            throw outputError(
+                                'SYNC_EXPORT_UNAVAILABLE',
+                                'The active renderer backend cannot export frames'
+                            )
+                        }
+                        if (typeof resources.queue.close !== 'function') {
+                            throw outputError('SYNC_EXPORT_UNAVAILABLE', 'Renderer returned an invalid export queue')
+                        }
+
+                        resources.sender = await this._client.createSender(name, {
+                            exportQueue: resources.queue,
+                            maxBufferedFrames: 1,
+                            clock: this._clock
+                        })
+                    }
+                    break
+                } catch (error) {
+                    if (resources.queue && typeof resources.queue.close === 'function') {
+                        try {
+                            resources.queue.close()
+                        } catch {
+                            // Retry cleanup is best effort.
+                        }
+                        resources.queue = null
+                    }
+                    if (error?.code !== 'SYNC_LIFECYCLE' && !this._disposed && attempt < maxAttempts && isRetryableRecoveryError(error)) {
+                        const delay = applyBackoffJitter(RECOVERY_DELAYS_MS[attempt - 1] ?? 1000, this._random)
+                        await new Promise((resolve, reject) => {
+                            resources.retryReject = reject
+                            resources.retryTimer = this._setTimeout(() => {
+                                resources.retryTimer = null
+                                resources.retryReject = null
+                                resolve()
+                            }, delay)
+                        })
+                        continue
+                    }
+                    throw error
+                }
+            }
+            this._assertLifecycleCurrent(lifecycleGeneration)
+            validateSender(resources.sender)
+            this._assertRendererIdentity(rendererIdentity)
+
+            configuredDescriptor = descriptor
+            const sender = resources.sender
+            const sink = createConfiguredSink(sender, (nextDescriptor) => {
+                configuredDescriptor = nextDescriptor
+                if (sinkGeneration !== null) {
+                    this._sinkConfigured(sender, sinkGeneration, nextDescriptor)
+                }
+            })
+            resources.removeSink = this._renderer.addSink(sink)
+            if (typeof resources.removeSink !== 'function') {
+                throw outputError('SYNC_RENDERER_UNAVAILABLE', 'Renderer did not return a sink removal handle')
+            }
+            this._assertLifecycleCurrent(lifecycleGeneration)
+
+            const generation = ++this._liveGeneration
+            sinkGeneration = generation
+            this._exportQueue = resources.queue
+            this._sender = sender
+            this._removeSink = resources.removeSink
+            this._liveCanvas = liveCanvas
+            this._liveDescriptor = configuredDescriptor
+            this._livePipeline = rendererIdentity.pipeline
+            this._compressedSender = compressed
+            resources.queue = null
+            resources.sender = null
+            resources.removeSink = null
+            if (this._startResources === resources) this._startResources = null
+            this._statsTimer = this._setInterval(
+                () => this._refreshStats(generation),
+                STATS_INTERVAL_MS
+            )
+            this._resetRecoveryBudget()
+            this._monitorSenderClosed(this._sender, generation)
+
+            this._setState({
+                status: 'sending',
+                width: configuredDescriptor.width,
+                height: configuredDescriptor.height,
+                fps: configuredDescriptor.fps,
+                stats: this._copyStats(this._sender.stats),
+                error: null
+            })
+            return this._state
+        } catch (error) {
+            this._clearStatsTimer()
+            this._cleanupStartResources(resources)
+            this._sender = null
+            this._exportQueue = null
+            this._removeSink = null
+            this._liveCanvas = null
+            this._liveDescriptor = null
+            this._livePipeline = null
+            this._compressedSender = false
+            this._closeClient()
+            if (error?.code === 'SYNC_LIFECYCLE') throw error
+            const code = typeof error?.code === 'string' ? error.code : 'SYNC_START_FAILED'
+            this._setState({
+                status: 'error',
+                connected: false,
+                error: publicError(code, error?.message)
+            })
+            throw error
+        } finally {
+            if (this._startResources === resources) this._startResources = null
+        }
+    }
+
+    async _runStop(generation) {
+        const sender = this._sender
+        const removeSink = this._removeSink
+        let firstError
+
+        this._clearStatsTimer()
+        this._removeSink = null
+        try {
+            removeSink()
+        } catch (error) {
+            firstError = error
+            try { sender.close() } catch {
+                // The renderer removal failure remains the first actionable error.
+            }
+        }
+
+        try {
+            await this._waitForSenderClosed(sender.closed)
+        } catch (error) {
+            if (!firstError) firstError = error
+        }
+        const finalStats = this._copyStats(sender.stats)
+
+        const clientError = this._releaseClient()
+        if (!firstError && clientError) firstError = clientError
+        this._invalidateLiveSession(generation)
+        this._resetRecoveryBudget()
+
+        if (firstError) {
+            const code = typeof firstError.code === 'string' ? firstError.code : 'SYNC_STOP_FAILED'
+            this._setState({
+                status: 'error',
+                connected: false,
+                senderName: null,
+                stats: finalStats,
+                error: publicError(code, firstError.message)
+            })
+            throw firstError
+        }
+
+        this._setState({
+            status: 'ready',
+            available: true,
+            connected: false,
+            senderName: null,
+            stats: finalStats,
+            error: null
+        })
+        return this._state
+    }
+
+    _readDescriptor(canvas = this._getCanvas()) {
+        if (this._getDescriptor) return validateDescriptor(this._getDescriptor())
+        return validateDescriptor({
+            width: canvas?.width,
+            height: canvas?.height,
+            format: 'rgba8unorm',
+            colorSpace: 'srgb',
+            alphaMode: 'premultiplied',
+            fps: 60
+        })
+    }
+
+    _captureRendererIdentity(canvas, descriptor) {
+        try {
+            return Object.freeze({
+                pipeline: this._renderer.pipeline,
+                canvas,
+                width: descriptor.width,
+                height: descriptor.height
+            })
+        } catch (cause) {
+            throw rendererReplacedError({ cause })
+        }
+    }
+
+    _assertRendererIdentity(identity) {
+        try {
+            const canvas = this._getCanvas()
+            if (this._renderer.pipeline !== identity.pipeline || canvas !== identity.canvas ||
+                canvas?.width !== identity.width || canvas?.height !== identity.height) {
+                throw rendererReplacedError()
+            }
+        } catch (error) {
+            if (error?.code === 'SYNC_RENDERER_REPLACED') throw error
+            throw rendererReplacedError({ cause: error })
+        }
+    }
+
+    _copyStats(stats) {
+        return Object.freeze({ ...stats })
+    }
+
+    _refreshStats(generation) {
+        if (generation !== this._liveGeneration || this._state.status !== 'sending' || !this._sender) {
+            return
+        }
+        this._setState({ stats: this._copyStats(this._sender.stats) })
+    }
+
+    _sinkConfigured(sender, generation, descriptor) {
+        if (generation !== this._liveGeneration || sender !== this._sender ||
+            this._state.status !== 'sending') {
+            return
+        }
+        this._liveDescriptor = descriptor
+        this._setState({
+            width: descriptor.width,
+            height: descriptor.height,
+            fps: descriptor.fps
+        })
+    }
+
+    _monitorSenderClosed(sender, generation) {
+        sender.closed.then(
+            () => this._senderEnded(sender, generation),
+            (error) => this._senderEnded(sender, generation, error)
+        )
+    }
+
+    _senderEnded(sender, generation, senderError) {
+        if (generation !== this._liveGeneration || sender !== this._sender ||
+            generation === this._stoppingGeneration || this._state.status !== 'sending') {
+            return
+        }
+
+        let rendererReplaced
+        try {
+            const canvas = this._getCanvas()
+            rendererReplaced = this._renderer.pipeline !== this._livePipeline ||
+                canvas !== this._liveCanvas ||
+                canvas?.width !== this._liveDescriptor?.width ||
+                canvas?.height !== this._liveDescriptor?.height
+        } catch {
+            rendererReplaced = true
+        }
+
+        const context = Object.freeze({
+            senderName: this._state.senderName,
+            providerIds: this._state.providerIds,
+            canvas: this._liveCanvas,
+            descriptor: this._liveDescriptor,
+            pipeline: this._livePipeline
+        })
+        this._clearStatsTimer()
+        this._clearRecoveryProbationTimer()
+        const removeSink = this._removeSink
+        this._invalidateLiveSession(generation)
+        try { removeSink?.() } catch {
+            // The unexpected closure is already terminal for this live session.
+        }
+        this._releaseClient()
+
+        if (!rendererReplaced && isRetryableRecoveryError(senderError)) {
+            this._beginRecovery(context, senderError)
+            return
+        }
+
+        const error = rendererReplaced
+            ? publicError(
+                'SYNC_RENDERER_REPLACED',
+                'Renderer backend or context was replaced; start Sync output again'
+            )
+            : publicError(
+                'SYNC_SENDER_CLOSED',
+                'Sync sender connection closed; connect and start again'
+            )
+        this._setState({
+            status: 'error',
+            connected: false,
+            senderName: null,
+            error
+        })
+    }
+
+    _beginRecovery(context, cause) {
+        const generation = ++this._recoveryGeneration
+        this._recoveryContext = context
+        this._lastRecoveryCause = Object.freeze({
+            code: typeof cause?.code === 'string' ? cause.code : null,
+            message: typeof cause?.message === 'string' ? cause.message : null,
+            closeCode: Number.isInteger(cause?.closeCode) ? cause.closeCode : null,
+            closeReason: typeof cause?.closeReason === 'string' && cause.closeReason !== '' ? cause.closeReason : null,
+            at: Date.now(),
+            recoveryCount: (this._lastRecoveryCause?.recoveryCount ?? 0) + 1
+        })
+        this._setState({
+            status: 'recovering',
+            available: true,
+            connected: false,
+            providerIds: context.providerIds,
+            senderName: context.senderName,
+            width: context.descriptor.width,
+            height: context.descriptor.height,
+            fps: context.descriptor.fps,
+            error: null
+        })
+        this._scheduleRecoveryAttempt(generation)
+    }
+
+    _scheduleRecoveryAttempt(generation) {
+        if (!this._isRecoveryCurrent(generation)) return
+        const delay = applyBackoffJitter(this._recoveryAttempts < RECOVERY_DELAYS_MS.length
+            ? RECOVERY_DELAYS_MS[this._recoveryAttempts]
+            : RECOVERY_SUSTAINED_DELAY_MS, this._random)
+        let timerId
+        timerId = this._setTimeout(() => {
+            this._clearTimeout(timerId)
+            if (this._recoveryTimer === timerId) this._recoveryTimer = null
+            void this._runRecoveryAttempt(generation)
+        }, delay)
+        this._recoveryTimer = timerId
+    }
+
+    async _runRecoveryAttempt(generation) {
+        if (!this._isRecoveryCurrent(generation)) return
+        this._recoveryAttempts++
+        let context = this._recoveryContext
+        const resources = {
+            passiveClient: null,
+            client: null,
+            queue: null,
+            sender: null,
+            removeSink: null
+        }
+        this._recoveryResources = resources
+        let credential
+
+        try {
+            this._assertRecoveryCurrent(generation)
+            context = this._adoptRecoveryRendererIdentity(context)
+
+            resources.passiveClient = await this._connectionProvider.createClient({})
+            this._assertRecoveryCurrent(generation)
+            if (!resources.passiveClient || typeof resources.passiveClient.probe !== 'function' ||
+                typeof resources.passiveClient.close !== 'function') {
+                throw outputError('SYNC_PROTOCOL', 'Sync recovery probe client is invalid')
+            }
+            const result = await resources.passiveClient.probe()
+            this._assertRecoveryCurrent(generation)
+            if (result?.available !== true) {
+                throw outputError(
+                    typeof result?.code === 'string' ? result.code : 'SYNC_UNAVAILABLE',
+                    'Sync is unavailable during recovery'
+                )
+            }
+            this._assertRecoveryProvider(result.health, context.providerIds)
+            try { resources.passiveClient.close() } catch {
+                // Recovery owns no state in a completed passive probe.
+            }
+            resources.passiveClient = null
+
+            this._assertRecoveryCurrent(generation)
+            context = this._adoptRecoveryRendererIdentity(context)
+            credential = this._currentCredential()
+            resources.client = await this._connectionProvider.createClient({ token: credential?.token })
+            this._assertRecoveryCurrent(generation)
+            if (!resources.client || typeof resources.client.connect !== 'function' ||
+                typeof resources.client.createSender !== 'function' ||
+                typeof resources.client.close !== 'function') {
+                throw outputError('SYNC_PROTOCOL', 'Authenticated Sync recovery client is invalid')
+            }
+            const welcome = await resources.client.connect()
+            this._assertRecoveryCurrent(generation)
+            this._assertRecoveryProvider(welcome, context.providerIds)
+            context = this._adoptRecoveryRendererIdentity(context)
+
+            if (supportsH264CanvasOutput(welcome)) {
+                resources.sender = await SyncH264CanvasSender.create({
+                    client: resources.client,
+                    name: context.senderName,
+                    canvas: context.canvas,
+                    descriptor: context.descriptor,
+                    clock: this._clock,
+                    logger: this._logger
+                })
+            } else {
+                resources.queue = this._renderer.createFrameExportQueue({ slots: 3 })
+                if (!resources.queue || typeof resources.queue.close !== 'function') {
+                    throw outputError(
+                        'SYNC_EXPORT_UNAVAILABLE',
+                        'The active renderer backend cannot export frames'
+                    )
+                }
+                resources.sender = await resources.client.createSender(context.senderName, {
+                    exportQueue: resources.queue,
+                    maxBufferedFrames: 1,
+                    clock: this._clock
+                })
+            }
+            this._assertRecoveryCurrent(generation)
+            validateSender(resources.sender)
+            context = this._adoptRecoveryRendererIdentity(context)
+
+            let configuredDescriptor = context.descriptor
+            let sinkGeneration = null
+            const sender = resources.sender
+            const sink = createConfiguredSink(sender, (descriptor) => {
+                configuredDescriptor = descriptor
+                if (sinkGeneration !== null) {
+                    this._sinkConfigured(sender, sinkGeneration, descriptor)
+                }
+            })
+            resources.removeSink = this._renderer.addSink(sink)
+            if (typeof resources.removeSink !== 'function') {
+                throw outputError(
+                    'SYNC_RENDERER_UNAVAILABLE',
+                    'Renderer did not return a sink removal handle'
+                )
+            }
+            this._assertRecoveryCurrent(generation)
+            context = this._adoptRecoveryRendererIdentity(context)
+            if (!descriptorsMatch(configuredDescriptor, context.descriptor)) {
+                throw rendererReplacedError()
+            }
+
+            const liveGeneration = ++this._liveGeneration
+            sinkGeneration = liveGeneration
+            this._client = resources.client
+            this._welcome = welcome
+            this._exportQueue = resources.queue
+            this._sender = resources.sender
+            this._removeSink = resources.removeSink
+            this._liveCanvas = context.canvas
+            this._liveDescriptor = configuredDescriptor
+            this._livePipeline = context.pipeline
+            this._compressedSender = supportsH264CanvasOutput(welcome)
+            resources.client = null
+            resources.queue = null
+            resources.sender = null
+            resources.removeSink = null
+            if (this._recoveryResources === resources) this._recoveryResources = null
+            this._recoveryContext = null
+            this._statsTimer = this._setInterval(
+                () => this._refreshStats(liveGeneration),
+                STATS_INTERVAL_MS
+            )
+            this._monitorSenderClosed(this._sender, liveGeneration)
+            this._scheduleRecoveryProbation(liveGeneration)
+            this._setState({
+                status: 'sending',
+                available: true,
+                connected: true,
+                providerIds: context.providerIds,
+                senderName: context.senderName,
+                width: configuredDescriptor.width,
+                height: configuredDescriptor.height,
+                fps: configuredDescriptor.fps,
+                stats: this._copyStats(this._sender.stats),
+                error: null
+            })
+        } catch (error) {
+            this._cleanupRecoveryResources(resources)
+            if (!this._isRecoveryCurrent(generation) || error === RECOVERY_CANCELLED) return
+            if (isRetryableRecoveryError(error)) {
+                this._scheduleRecoveryAttempt(generation)
+            } else {
+                this._finishRecovery(error, credential)
+            }
+        } finally {
+            if (this._recoveryResources === resources) this._recoveryResources = null
+        }
+    }
+
+    _assertRecoveryProvider(source, expectedProviderIds) {
+        const providerIds = selectedSendProviderIds(source)
+        if (providerIds.length === 0) {
+            throw outputError(
+                'SYNC_PROVIDER_UNAVAILABLE',
+                'Sync has no selected available send providers'
+            )
+        }
+        if (!sameProviderIdSet(providerIds, expectedProviderIds)) {
+            throw outputError('SYNC_PROVIDER_REPLACED', 'The set of selected Sync providers changed')
+        }
+    }
+
+    _adoptRecoveryRendererIdentity(context) {
+        try {
+            const canvas = this._getCanvas()
+            const descriptor = this._readDescriptor(canvas)
+            if (this._renderer.pipeline !== context.pipeline || canvas !== context.canvas) {
+                throw rendererReplacedError()
+            }
+            if (descriptorsMatch(descriptor, context.descriptor)) return context
+            const adopted = Object.freeze({ ...context, descriptor })
+            // Later attempts must start from the geometry that is live now, not
+            // from the one captured before the close.
+            if (this._recoveryContext === context) this._recoveryContext = adopted
+            return adopted
+        } catch (error) {
+            if (error?.code === 'SYNC_RENDERER_REPLACED') throw error
+            throw rendererReplacedError({ cause: error })
+        }
+    }
+
+    _isRecoveryCurrent(generation) {
+        return generation === this._recoveryGeneration &&
+            this._state.status === 'recovering' && this._recoveryContext !== null
+    }
+
+    _assertRecoveryCurrent(generation) {
+        if (!this._isRecoveryCurrent(generation)) throw RECOVERY_CANCELLED
+    }
+
+    _cleanupRecoveryResources(resources) {
+        const removeSink = resources?.removeSink
+        if (resources) resources.removeSink = null
+        try { removeSink?.() } catch {
+            // Continue releasing the remaining off-side resources.
+        }
+
+        const sender = resources?.sender
+        if (resources) {
+            resources.sender = null
+            if (sender) resources.queue = null
+        }
+        try { sender?.close() } catch {
+            // Continue releasing the recovery clients.
+        }
+
+        const queue = resources?.queue
+        if (resources) resources.queue = null
+        try { queue?.close() } catch {
+            // Continue releasing the recovery clients.
+        }
+
+        for (const key of ['passiveClient', 'client']) {
+            const client = resources?.[key]
+            if (resources) resources[key] = null
+            try { client?.close() } catch {
+                // Recovery cleanup is best effort across every owned resource.
+            }
+        }
+    }
+
+    _finishRecovery(error, credential) {
+        this._recoveryGeneration++
+        this._clearRecoveryTimer()
+        this._clearRecoveryProbationTimer()
+        this._cleanupRecoveryResources(this._recoveryResources)
+        this._recoveryResources = null
+        this._recoveryContext = null
+        this._recoveryAttempts = 0
+        if (error?.code === 'SYNC_AUTHENTICATION') this._clearCredential(credential)
+        this._setState({
+            status: 'error',
+            available: error?.code !== 'SYNC_UNAVAILABLE',
+            connected: false,
+            senderName: null,
+            error: fixedRecoveryError(error)
+        })
+    }
+
+    _cancelRecovery({ resetAttempts = false } = {}) {
+        this._recoveryGeneration++
+        this._clearRecoveryTimer()
+        this._clearRecoveryProbationTimer()
+        this._cleanupRecoveryResources(this._recoveryResources)
+        this._recoveryResources = null
+        this._recoveryContext = null
+        if (resetAttempts) this._recoveryAttempts = 0
+    }
+
+    _scheduleRecoveryProbation(liveGeneration) {
+        this._clearRecoveryProbationTimer()
+        let timerId
+        timerId = this._setTimeout(() => {
+            this._clearTimeout(timerId)
+            if (this._recoveryProbationTimer === timerId) this._recoveryProbationTimer = null
+            if (liveGeneration === this._liveGeneration && this._state.status === 'sending') {
+                this._recoveryAttempts = 0
+            }
+        }, RECOVERY_PROBATION_MS)
+        this._recoveryProbationTimer = timerId
+    }
+
+    _clearRecoveryTimer() {
+        if (this._recoveryTimer === null) return
+        this._clearTimeout(this._recoveryTimer)
+        this._recoveryTimer = null
+    }
+
+    _clearRecoveryProbationTimer() {
+        if (this._recoveryProbationTimer === null) return
+        this._clearTimeout(this._recoveryProbationTimer)
+        this._recoveryProbationTimer = null
+    }
+
+    _resetRecoveryBudget() {
+        this._clearRecoveryTimer()
+        this._clearRecoveryProbationTimer()
+        this._recoveryAttempts = 0
+        this._recoveryContext = null
+    }
+
+    _waitForSenderClosed(closed) {
+        let timeoutId
+        const timeout = new Promise((resolve, reject) => {
+            timeoutId = this._setTimeout(() => {
+                reject(outputError(
+                    'SYNC_STOP_TIMEOUT',
+                    `Sync sender did not close within ${STOP_TIMEOUT_MS}ms`
+                ))
+            }, STOP_TIMEOUT_MS)
+        })
+        return Promise.race([closed, timeout]).finally(() => {
+            this._clearTimeout(timeoutId)
+        })
+    }
+
+    _invalidateLiveSession(generation) {
+        if (this._liveGeneration === generation) this._liveGeneration++
+        this._stoppingGeneration = 0
+        this._sender = null
+        this._exportQueue = null
+        this._removeSink = null
+        this._liveCanvas = null
+        this._liveDescriptor = null
+        this._livePipeline = null
+        this._compressedSender = false
+    }
+
+    _clearStatsTimer() {
+        if (this._statsTimer === null) return
+        this._clearInterval(this._statsTimer)
+        this._statsTimer = null
+    }
+
+    _closeClient() {
+        this._releaseClient()
+    }
+
+    _releaseClient() {
+        const client = this._client
+        this._client = null
+        this._welcome = null
+        if (!client) return null
+        if (this._ownedClients?.has(client)) return this._closeOwnedClient(client)
+        try {
+            client.close?.()
+            return null
+        } catch (error) {
+            return error
+        }
+    }
+
+    _currentCredential() {
+        return this._credentialStore?.current() ?? this._credential
+    }
+
+    _publishCredential(token) {
+        if (this._credentialStore) return this._credentialStore.publish(token)
+        this._credential = Object.freeze({ token })
+        return this._credential
+    }
+
+    _clearCredential(credential) {
+        if (this._credentialStore) return this._credentialStore.clear(credential)
+        if (!credential || credential !== this._credential) return false
+        this._credential = undefined
+        return true
+    }
+
+    _setState(next) {
+        if (this._disposed) return
+        const state = { ...this._state, ...next }
+        if (next.stats) state.stats = this._copyStats(next.stats)
+        this._state = Object.freeze(state)
+        for (const listener of this._listeners) {
+            try {
+                listener(this._state)
+            } catch {
+                // View listeners cannot take ownership of the controller lifecycle.
+            }
+        }
+    }
+}
+
+const PROVIDER_NAMES = Object.freeze({
+    syphon: 'Syphon',
+    spout: 'Spout',
+    ndi: 'NDI',
+    camera: 'Sync Camera'
+})
+
+const ERROR_STATUS_MESSAGES = Object.freeze({
+    SYNC_PERMISSION_REQUIRED: 'Loopback access is required. Choose Connect Sync so the browser can request it.',
+    SYNC_PERMISSION_DENIED: 'Loopback access was denied. Allow it for this site and try again.',
+    SYNC_UNAVAILABLE: 'The Sync companion did not respond. Open Sync on this device and check again.',
+    SYNC_PAIRING_DENIED: 'Pairing was denied in Sync. Connect again when you are ready to approve this origin.',
+    SYNC_PAIRING_BUSY: 'Sync is handling another pairing request. Wait for it to finish and connect again.',
+    SYNC_PAIRING_STORE: 'Sync could not save this pairing. Check its storage access and connect again.',
+    SYNC_PAIRING_DURABILITY: 'Sync could not confirm durable pairing storage. Resolve its storage warning and connect again.',
+    SYNC_PAIRING_ORIGIN_LIMIT: 'Sync has reached its paired-origin limit. Revoke an old origin and connect again.',
+    SYNC_TIMEOUT: 'Sync did not respond in time. Check the companion and try again.',
+    SYNC_PROVIDER_UNAVAILABLE: 'Sync has no available output provider. Enable an output provider in Sync and reconnect.',
+    SYNC_PROVIDER_REPLACED: 'Sync output providers changed. Reconnect before starting the sender again.',
+    SYNC_RENDERER_UNAVAILABLE: 'The active Noisemaker renderer does not expose the Sync output seam.',
+    SYNC_EXPORT_UNAVAILABLE: 'The active graphics backend cannot export frames for Sync.',
+    SYNC_AUTHENTICATION: 'Sync rejected this pairing. Connect again to pair this origin.',
+    SYNC_SENDER_CLOSED: 'The Sync sender closed unexpectedly. Reconnect to create a new sender.',
+    SYNC_SENDER_LOST: 'The Sync sender connection was lost. HD4 is trying to recover it.',
+    SYNC_RENDERER_REPLACED: 'The graphics backend or context changed. Reconnect before restarting the sender.',
+    SYNC_STOP_TIMEOUT: 'The Sync sender did not close in time. Reconnect before starting another output.',
+    SYNC_INVALID_SENDER_NAME: 'Use an output name with 1–64 UTF-8 bytes and no control or formatting characters.',
+    SYNC_NOT_CONNECTED: 'Connect Sync before starting an output.',
+    SYNC_PROTOCOL: 'Sync returned an invalid response. Reconnect and try again.',
+    SYNC_CAPABILITY: 'Sync no longer exposes the required output capability.',
+    SYNC_CONFIGURATION: 'Sync output configuration is invalid. Reconnect and try again.',
+    SYNC_LIFECYCLE: 'The Sync connection closed. Reconnect and try again.',
+    SYNC_CLIENT_INVALID: 'The Sync client could not create this output.',
+    SYNC_SENDER_INVALID: 'Sync returned an invalid sender. Reconnect and try again.',
+    SYNC_START_FAILED: 'Sync could not start this output. Reconnect and try again.',
+    SYNC_STOP_FAILED: 'Sync could not stop cleanly. Reconnect before starting another output.'
+})
+
+const ACTIONS = Object.freeze({
+    check: Object.freeze({ kind: 'check', label: 'Check again', disabled: false }),
+    checking: Object.freeze({ kind: 'checking', label: 'Checking…', disabled: true }),
+    connect: Object.freeze({ kind: 'connect', label: 'Connect Sync', disabled: false }),
+    connecting: Object.freeze({ kind: 'connecting', label: 'Connecting…', disabled: true }),
+    start: Object.freeze({ kind: 'start', label: 'Start sending', disabled: false }),
+    starting: Object.freeze({ kind: 'starting', label: 'Starting…', disabled: true }),
+    stop: Object.freeze({ kind: 'stop', label: 'Stop sending', disabled: false }),
+    stopping: Object.freeze({ kind: 'stopping', label: 'Stopping…', disabled: true })
+})
+
+function finiteCounter(value) {
+    return Number.isFinite(value) && value >= 0 ? value : 0
+}
+
+function actionForState(state) {
+    switch (state.status) {
+    case 'checking': return ACTIONS.checking
+    case 'starting': return ACTIONS.starting
+    case 'sending':
+    case 'recovering': return ACTIONS.stop
+    case 'stopping': return ACTIONS.stopping
+    case 'ready': return state.connected ? ACTIONS.start : ACTIONS.connect
+    case 'error':
+        if (state.connected) return ACTIONS.start
+        return state.error?.code === 'SYNC_UNAVAILABLE' ? ACTIONS.check : ACTIONS.connect
+    case 'unavailable':
+        return state.error?.code && state.error.code !== 'SYNC_UNAVAILABLE'
+            ? ACTIONS.connect
+            : ACTIONS.check
+    case 'idle':
+    default: return ACTIONS.check
+    }
+}
+
+function stateLabel(state) {
+    switch (state.status) {
+    case 'checking': return 'Checking…'
+    case 'starting': return 'Starting…'
+    case 'sending': return 'Sending'
+    case 'recovering': return 'Recovering…'
+    case 'stopping': return 'Stopping…'
+    case 'ready': return state.connected ? 'Connected' : 'Ready'
+    case 'error': return 'Needs attention'
+    case 'unavailable':
+        return state.error?.code && state.error.code !== 'SYNC_UNAVAILABLE'
+            ? 'Needs attention'
+            : 'Disconnected'
+    case 'idle':
+    default: return 'Disconnected'
+    }
+}
+
+function statusMessage(state) {
+    if (state.error) {
+        return ERROR_STATUS_MESSAGES[state.error.code] ||
+            'Sync could not continue. Check the companion and try again.'
+    }
+    switch (state.status) {
+    case 'checking': return 'Looking for the local Sync companion…'
+    case 'starting': return 'Starting the Sync sender…'
+    case 'sending': return 'HD4 is publishing through Sync.'
+    case 'recovering': return 'Sync lost the sender connection and is recovering…'
+    case 'stopping': return 'Stopping the Sync sender…'
+    case 'ready':
+        return state.connected
+            ? 'Connected to Sync. Start sending when ready.'
+            : 'Sync is available. Connect to pair HD4.'
+    case 'idle':
+    case 'unavailable':
+    case 'error':
+    default: return 'Sync is not connected.'
+    }
+}
+
+export function deriveSyncOutputView(state = {}, { policy = { status: 'unknown' } } = {}) {
+    const policyBlocked = policy.status === 'blocked' && !['sending', 'recovering', 'stopping'].includes(state.status)
+    const providerIds = Array.isArray(state.providerIds)
+        ? state.providerIds.filter((id) => typeof id === 'string' && id.length > 0)
+        : []
+    const width = Number.isSafeInteger(state.width) && state.width > 0 ? state.width : null
+    const height = Number.isSafeInteger(state.height) && state.height > 0 ? state.height : null
+    const fps = Number.isFinite(state.fps) && state.fps > 0 ? state.fps : 60
+    const stats = state.stats || EMPTY_STATS
+
+    return Object.freeze({
+        policyBlocked,
+        action: policyBlocked ? Object.freeze({ ...ACTIONS.connect, disabled: true }) : actionForState(state),
+        stateLabel: stateLabel(state),
+        live: state.status === 'sending',
+        nameDisabled: ['checking', 'starting', 'sending', 'recovering', 'stopping'].includes(state.status),
+        provider: providerIds.length > 0
+            ? providerIds.map((id) => PROVIDER_NAMES[id] || id).join(', ')
+            : 'No provider',
+        format: width && height ? `${width}×${height} · ${fps} fps` : `—×— · ${fps} fps`,
+        status: policyBlocked ? 'The embedding page must allow loopback-network access for Sync. Open this app in its own tab or ask the embedding page to allow access.' : statusMessage(state),
+        counters: Object.freeze({
+            sent: finiteCounter(stats.sent),
+            gpuBusy: finiteCounter(stats.droppedBusy),
+            network: finiteCounter(stats.droppedBackpressure),
+            failed: finiteCounter(stats.failed)
+        })
+    })
+}
+
+let syncOutputController = null
+
+export function initializeSyncOutputController(options) {
+    if (!syncOutputController || syncOutputController._disposed) {
+        syncOutputController = new SyncOutputController(options)
+    }
+    return syncOutputController
+}
+
+export function getSyncOutputController() {
+    return syncOutputController
+}

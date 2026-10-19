@@ -49,3 +49,39 @@ test('standalone app fits in a 1280x720 desktop viewport without page scroll', a
         expect(rect.right, `${rect.selector} right edge`).toBeGreaterThanOrEqual(metrics.viewport.width - 1)
     }
 })
+
+test('every top-bar control is fully visible at 1280x720, even with the REC timer running', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await page.goto('/')
+    await page.waitForFunction(() => window.__hd4?.ready === true, null, { timeout: 30_000 })
+    // The widest REC label: the running timer.
+    await page.evaluate(() => {
+        const rec = document.querySelector('.hd4-rec-btn')
+        rec.classList.add('is-active')
+        rec.textContent = '● 00:00:00'
+    })
+    await page.waitForTimeout(100)
+
+    const layout = await page.evaluate(() => {
+        const bar = document.querySelector('#hd4-topbar').getBoundingClientRect()
+        const controls = [...document.querySelectorAll('#hd4-topbar button, #hd4-topbar select, #hd4-topbar led-matrix')]
+            .filter((el) => el.getClientRects().length > 0)
+            .map((el) => {
+                const r = el.getBoundingClientRect()
+                return { name: el.textContent.trim() || el.getAttribute('aria-label') || el.tagName, left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+            })
+        return { bar: { left: bar.left, right: bar.right, top: bar.top, bottom: bar.bottom }, controls }
+    })
+    expect(layout.controls.map((c) => c.name)).toEqual(expect.arrayContaining(['SYNC OUT', 'VIEWPORT']))
+    for (const c of layout.controls) {
+        expect(c.left, `${c.name} left`).toBeGreaterThanOrEqual(layout.bar.left)
+        expect(c.right, `${c.name} right`).toBeLessThanOrEqual(layout.bar.right)
+        expect(c.top, `${c.name} top`).toBeGreaterThanOrEqual(layout.bar.top)
+        expect(c.bottom, `${c.name} bottom`).toBeLessThanOrEqual(layout.bar.bottom)
+    }
+    // Neighbouring controls never overlap.
+    const sorted = [...layout.controls].sort((a, b) => a.left - b.left)
+    for (let i = 1; i < sorted.length; i++) {
+        expect(sorted[i].left, `${sorted[i].name} after ${sorted[i - 1].name}`).toBeGreaterThanOrEqual(sorted[i - 1].right - 0.5)
+    }
+})

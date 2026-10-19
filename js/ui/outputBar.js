@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 /**
  * Output bar — the top strip: the HD4 brand plus the master output
- * controls ([FREEZE] [OUTPUT FADE] [VFX]). The brand is the inline
+ * controls ([FREEZE] [OUTPUT FADE] [STILL] [REC] [VFX]) and the external
+ * outputs ([SYNC OUT] opens the Noisedeck Sync dialog, [VIEWPORT] opens the
+ * secondary-display window, or focuses it). The brand is the inline
  * instant_mix mark (js/ui/logo.js) riding handfish's industrial
  * `.hf-logotype` wordmark; the container is the `.hf-topbar` so the
  * normalized cluster (settings + info, appended by the app) aligns right. Toggle buttons call back into the OutputState;
@@ -12,7 +14,7 @@
 import { VFX, VFX_ORDER } from '../vfx.js'
 import { logoSvg } from './logo.js'
 
-export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord } = {}) {
+export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord, onViewport } = {}) {
     container.innerHTML = ''
 
     const logo = document.createElement('div')
@@ -44,7 +46,13 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
     }
     vfxSelect.addEventListener('change', () => onVfx?.(vfxSelect.value))
 
-    group.append(freeze.el, fade.el, still.el, record.el, vfxSelect)
+    // External outputs. The Sync dialog binds to #sync-output-open itself.
+    const syncOut = toggleButton('SYNC OUT', null, 'Send the program to Noisedeck Sync')
+    syncOut.el.id = 'sync-output-open'
+    syncOut.el.setAttribute('aria-haspopup', 'dialog')
+    const viewport = toggleButton('VIEWPORT', onViewport, 'Open the program in a window for a secondary display (close that window to detach)')
+
+    group.append(freeze.el, fade.el, still.el, record.el, vfxSelect, syncOut.el, viewport.el)
     container.append(logo, group)
 
     return {
@@ -57,6 +65,8 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
             record.setActive(on)
             record.el.textContent = on ? (label || '● REC') : 'REC'
         },
+        setSyncLive(on) { syncOut.setActive(on) },
+        setViewport(on) { viewport.setActive(on) },
     }
 }
 

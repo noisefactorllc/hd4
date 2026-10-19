@@ -37,6 +37,7 @@ export const {
     extractEffectsFromDsl,
     AudioInputManager,
     ProgramState,
+    SinkManager,
     VERSION
 } = bundle
 
