@@ -21,6 +21,7 @@ import { createSource } from '../../js/sources/sourceModel.js'
 import { makeShaderDriver } from '../../js/sources/shaderSource.js'
 
 const MAGENTA = 'search synth\nsolid(color: #ff00ff).write(o0)\nrender(o0)'
+const CYAN = 'search synth\nsolid(color: #00ffff).write(o0)\nrender(o0)'
 const parses = () => ({ diagnostics: [] })
 const rejects = () => { throw new Error("Expect '(' at line 1 col 7") }
 
@@ -50,8 +51,12 @@ test('empty or whitespace-only text is empty, and the parser is not consulted', 
 test('text over the length limit is refused before it is parsed', () => {
     const parse = () => assert.fail('parsed oversized text')
     assert.deepEqual(pastedSource('x'.repeat(MAX_PROGRAM_LENGTH + 1), parse), { error: 'large' })
-    const atLimit = MAGENTA + ' '.repeat(MAX_PROGRAM_LENGTH - MAGENTA.length)
-    assert.equal(pastedSource(atLimit, parses).source.dsl, MAGENTA)
+    assert.equal(pastedSource('x'.repeat(MAX_PROGRAM_LENGTH), parses).source.dsl.length, MAX_PROGRAM_LENGTH)
+})
+
+test('the length limit applies to the program, not the whitespace around it', () => {
+    const padded = MAGENTA + ' '.repeat(MAX_PROGRAM_LENGTH)
+    assert.equal(pastedSource(padded, parses).source.dsl, MAGENTA)
 })
 
 test('text the parser rejects is invalid, with its message', () => {
@@ -80,14 +85,19 @@ test('text fields take their own paste; other controls do not', () => {
     assert.equal(isTextEntry(null), false)
 })
 
-/** A paste event target that records its listeners. */
+/** A document-like paste event target that records its listeners. */
 function fakeTarget() {
     const listeners = new Set()
+    const presses = new Set()
+    const body = { tagName: 'BODY' }
     return {
-        addEventListener(type, fn) { if (type === 'paste') listeners.add(fn) },
-        removeEventListener(type, fn) { if (type === 'paste') listeners.delete(fn) },
-        get count() { return listeners.size },
-        paste(text, { target = { tagName: 'BODY' }, path = null, defaultPrevented = false } = {}) {
+        body,
+        activeElement: body,
+        addEventListener(type, fn) { if (type === 'paste') listeners.add(fn); if (type === 'pointerdown') presses.add(fn) },
+        removeEventListener(type, fn) { listeners.delete(fn); presses.delete(fn) },
+        get count() { return listeners.size + presses.size },
+        press(target) { for (const fn of presses) fn({ target }) },
+        paste(text, { target = body, path = null, defaultPrevented = false } = {}) {
             const e = {
                 target,
                 defaultPrevented,
@@ -320,4 +330,95 @@ test('a clipboard read that is refused, or no clipboard at all, reports DENIED',
     const none = await setup({}, { clipboard: undefined })
     await none.flow.pasteFromClipboard(0)
     assert.deepEqual(none.reports, ['DENIED'])
+})
+
+test('the newest paste wins when an older one finishes its check later', async () => {
+    const slow = deferred()
+    const t = await setup({ check: (dsl) => (dsl === MAGENTA ? slow.promise : Promise.resolve(null)) })
+    const older = t.flow.paste(0, MAGENTA)
+    await t.flow.paste(0, CYAN)
+    slow.resolve(null)
+    await older
+    assert.equal(t.channel.source.dsl, CYAN)
+    assert.deepEqual(t.reports, ['CH 1'])
+})
+
+test('the newest paste wins when an older one finishes its check first', async () => {
+    const slow = deferred()
+    const t = await setup({ check: (dsl) => (dsl === CYAN ? slow.promise : Promise.resolve(null)) })
+    const older = t.flow.paste(0, MAGENTA)
+    const newer = t.flow.paste(0, CYAN)
+    await older // its check passed, but a newer paste was made: it gives up
+    assert.equal(t.channel.source.dsl, COLOR_BARS.dsl)
+    slow.resolve(null)
+    await newer
+    assert.equal(t.channel.source.dsl, CYAN)
+    assert.deepEqual(t.reports, ['CH 1'])
+    assert.deepEqual(t.renderer.compiles, [CYAN])
+})
+
+// --- attachProgramPaste with a scope: the rack, where HD4 shares the page ---
+
+/** A rack slot: contains() answers for the elements inside it. */
+function fakeScope(...inside) {
+    const set = new Set(inside)
+    return { contains: (el) => set.has(el) }
+}
+
+test('in a scope, a paste aimed inside it loads', () => {
+    const target = fakeTarget()
+    const picker = { tagName: 'SELECT' }
+    const got = []
+    attachProgramPaste((text) => got.push(text), target, { scope: fakeScope(picker) })
+    target.activeElement = picker
+    target.paste('a', { target: picker })
+    assert.deepEqual(got, ['a'])
+})
+
+test('in a scope, a paste aimed at another module is left to the page', () => {
+    const target = fakeTarget()
+    const other = { tagName: 'BUTTON' }
+    const got = []
+    attachProgramPaste((text) => got.push(text), target, { scope: fakeScope() })
+    target.press(other)
+    target.activeElement = other
+    const e = target.paste('a', { target: other })
+    assert.deepEqual(got, [])
+    assert.equal(e.defaultPrevented, false)
+})
+
+test('in a scope, a paste with nothing focused loads only after a press inside it', () => {
+    const target = fakeTarget()
+    const monitor = { tagName: 'CANVAS' }
+    const elsewhere = { tagName: 'DIV' }
+    const got = []
+    attachProgramPaste((text) => got.push(text), target, { scope: fakeScope(monitor) })
+    target.paste('before any press')
+    target.press(monitor)
+    target.paste('after a press inside')
+    // Chromium aims a paste with nothing focused at the selection: focus decides.
+    target.paste('aimed at the selection', { target: elsewhere })
+    target.press(elsewhere)
+    target.paste('after a press elsewhere')
+    assert.deepEqual(got, ['after a press inside', 'aimed at the selection'])
+})
+
+test('in a scope, a press inside does not take a paste focused on another module', () => {
+    const target = fakeTarget()
+    const monitor = { tagName: 'CANVAS' }
+    const other = { tagName: 'BUTTON' }
+    const got = []
+    attachProgramPaste((text) => got.push(text), target, { scope: fakeScope(monitor) })
+    target.press(monitor)
+    target.activeElement = other // tabbed away without a press
+    target.paste('a', { target: other })
+    assert.deepEqual(got, [])
+})
+
+test('the scoped teardown removes the press listener too', () => {
+    const target = fakeTarget()
+    const detach = attachProgramPaste(() => {}, target, { scope: fakeScope() })
+    assert.equal(target.count, 2)
+    detach()
+    assert.equal(target.count, 0)
 })

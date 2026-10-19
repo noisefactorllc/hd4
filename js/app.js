@@ -637,8 +637,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // Cmd/Ctrl+V loads it into the PVW channel, to check on preview before
     // TAKE; a picker's Paste program loads it into that channel. Text that is
     // not a program, or a program that fails to compile, leaves the channel
-    // on what it was showing. In the rack, HD4 takes only the pastes made
-    // inside its own panel, never the host page's.
+    // on what it was showing. In the rack, HD4 takes only the pastes meant
+    // for its own panel, never the host page's or another module's.
     const programPaste = createProgramPaste({
         channels: state.channels,
         renderers: state.renderers,
@@ -649,8 +649,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
     })
     const detachProgramPaste = attachProgramPaste(
         (text) => { programPaste.paste(previewBus.preview - 1, text) },
-        container || document,
-        { isSuspended: overlayOpen },
+        document,
+        { isSuspended: overlayOpen, scope: container },
     )
 
     // --- USER assignable macro buttons ---

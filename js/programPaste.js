@@ -42,9 +42,9 @@ const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'pass
  * { error: 'empty' | 'large' | 'invalid', message? } when it is not one.
  */
 export function pastedSource(text, parse) {
-    if (typeof text === 'string' && text.length > MAX_PROGRAM_LENGTH) return { error: 'large' }
     const dsl = typeof text === 'string' ? text.trim() : ''
     if (!dsl) return { error: 'empty' }
+    if (dsl.length > MAX_PROGRAM_LENGTH) return { error: 'large' }
     try {
         parse(dsl)
     } catch (e) {
@@ -60,11 +60,17 @@ export function pastedSource(text, parse) {
  * TOO BIG, FAILED, DENIED); refresh() re-syncs the pickers.
  *
  * A choice made on the channel while a paste waits (its effects can take
- * seconds to download) owns the channel: the paste then gives up quietly.
+ * seconds to download) owns the channel, and so does a newer paste: the
+ * older paste then gives up quietly.
  */
 export function createProgramPaste({ channels, renderers, parse, report, refresh, clipboard }) {
+    const latest = [] // per channel: the newest paste's number
+
     async function paste(index, text) {
         const channel = channels[index]
+        const token = latest[index] = (latest[index] || 0) + 1
+        const before = channel.source
+        const overtaken = () => token !== latest[index] || channel.source !== before
         const pasted = pastedSource(text, parse)
         if (pasted.error) {
             if (pasted.message) console.warn('[hd4] the clipboard holds no program:', pasted.message)
@@ -72,18 +78,17 @@ export function createProgramPaste({ channels, renderers, parse, report, refresh
             refresh()
             return
         }
-        const before = channel.source
         let problem
         try {
             problem = await renderers[index].check(pasted.source.dsl)
         } catch (e) {
-            if (channel.source !== before) return
+            if (overtaken()) return
             console.warn(`[hd4] the pasted program's effects did not load`, e?.message || e)
             report('FAILED')
             refresh()
             return
         }
-        if (channel.source !== before) return
+        if (overtaken()) return
         if (problem) {
             console.warn(`[hd4] channel ${index + 1} pasted program does not compile:`, problem)
             report('INVALID')
@@ -96,8 +101,8 @@ export function createProgramPaste({ channels, renderers, parse, report, refresh
             report(`CH ${index + 1}`)
         } catch (e) {
             // The channel fell back to its previous source, unless a newer
-            // choice has taken it over since.
-            if (channel.source !== before) return
+            // choice or paste has taken it over since.
+            if (overtaken()) return
             console.warn(`[hd4] channel ${index + 1} pasted program was not applied`, e?.message || e)
             report('INVALID')
         }
@@ -135,16 +140,32 @@ export function isTextEntry(el) {
  * (defaultPrevented), when it lands in a text field (read through the
  * composed path, so a field inside a component's shadow root counts), or
  * while isSuspended() returns true.
+ *
+ * With a scope (HD4's root in the rack, which shares the page with other
+ * modules), only pastes meant for HD4 are taken: those aimed inside the
+ * scope, and those made with nothing focused when the last pointer press
+ * was inside it. A click on a monitor leaves nothing focused, so Cmd/Ctrl+V
+ * still works after it. (With nothing focused, Chromium aims the paste at
+ * the selection, so the focus decides, not the event's target.)
  */
-export function attachProgramPaste(onPaste, target = document, { isSuspended } = {}) {
+export function attachProgramPaste(onPaste, target = document, { isSuspended, scope = null } = {}) {
+    let pressedInside = false
+    const onPointerDown = (e) => { pressedInside = !!scope?.contains(e.target) }
+    const nothingFocused = () => !target.activeElement || target.activeElement === target.body
+    const inScope = (el) => !scope || scope.contains(el) || (pressedInside && nothingFocused())
     const onPasteEvent = (e) => {
         if (e.defaultPrevented) return
         const el = e.composedPath?.()[0] || e.target
         if (isTextEntry(el)) return
+        if (!inScope(e.target)) return
         if (isSuspended?.()) return
         e.preventDefault()
         onPaste(e.clipboardData?.getData('text/plain') || '')
     }
     target.addEventListener('paste', onPasteEvent)
-    return () => target.removeEventListener('paste', onPasteEvent)
+    if (scope) target.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+        target.removeEventListener('paste', onPasteEvent)
+        if (scope) target.removeEventListener('pointerdown', onPointerDown, true)
+    }
 }

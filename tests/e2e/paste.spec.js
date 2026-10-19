@@ -175,6 +175,41 @@ test('a recalled program still downloading its effects never overrides a newer c
     expect(await page.evaluate(() => window.__hd4.renderers[1].currentDsl)).toBe(GRID)
 })
 
+test('a newer choice made while an older program is still compiling in the engine stays on screen', async ({ page }) => {
+    // Hold the engine compile of the pasted program; Grid is chosen meanwhile.
+    await page.evaluate((dsl) => {
+        const inner = window.__hd4.renderers[1].inner
+        const compile = inner.compile.bind(inner)
+        window.__releaseCompile = null
+        inner.compile = async (d) => {
+            if (d === dsl) await new Promise((r) => { window.__releaseCompile = r })
+            return compile(d)
+        }
+    }, MAGENTA)
+    await pasteKeys(page, MAGENTA)
+    await page.waitForFunction(() => typeof window.__releaseCompile === 'function', null, { timeout: 15_000 })
+    await page.selectOption(picker(2), 'shader:Grid')
+    await page.waitForFunction(() => window.__hd4.channels[1].label === 'Grid', null, { timeout: 15_000 })
+
+    await page.evaluate(() => window.__releaseCompile())
+    await expect.poll(() => page.evaluate(() => window.__hd4.renderers[1].currentDsl), { timeout: 15_000 }).toBe(GRID)
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 500)))
+    // Grid, not magenta, is what the channel shows.
+    expect(dist(await channelAvg(page, 1), [255, 0, 255])).toBeGreaterThan(100)
+    expect(await page.evaluate(() => window.__ledLog.filter((l) => l.startsWith('PASTE')))).toEqual([])
+})
+
+test('every library program passes the renderer check', async ({ page }) => {
+    const problems = await page.evaluate(async () => {
+        const { SHADER_PRESETS } = await import('/js/sources/presets.js')
+        const out = {}
+        for (const p of SHADER_PRESETS) out[p.name] = await window.__hd4.renderers[0].check(p.dsl)
+        return out
+    })
+    expect(Object.keys(problems).length).toBeGreaterThan(0)
+    for (const [name, problem] of Object.entries(problems)) expect(problem, name).toBeNull()
+})
+
 test('a recalled program that no longer compiles falls back, and the picker follows', async ({ page }) => {
     await pasteKeys(page, MAGENTA)
     await expect.poll(() => lastReadout(page)).toBe('PASTE CH 2')

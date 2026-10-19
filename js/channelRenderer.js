@@ -46,6 +46,7 @@ export class ChannelRenderer {
 
         this._initialized = false
         this._compileSeq = 0 // the newest compile; an older one that finishes late is dropped
+        this._engineTurn = Promise.resolve() // engine compiles run one at a time, in order
         this._currentDsl = ''
         this._mediaStep = null
         this._lastSize = null
@@ -71,7 +72,8 @@ export class ChannelRenderer {
      * message via onError. A compile that a newer one overtook while it
      * waited (effects can take seconds to download) is dropped, resolving
      * { success: false, superseded: true }, so it never replaces the newer
-     * program on screen.
+     * program on screen. Engine compiles run one at a time, so the newest
+     * program is always the last one compiled.
      */
     async compile(dsl) {
         const seq = ++this._compileSeq
@@ -80,7 +82,9 @@ export class ChannelRenderer {
         try {
             await this._loadEffectsFor(dsl)
             if (superseded()) return { success: false, superseded: true }
-            await this._renderer.compile(dsl)
+            const turn = this._engineTurn.then(() => (superseded() ? null : this._renderer.compile(dsl)))
+            this._engineTurn = turn.catch(() => { /* the compile reports its own error below */ })
+            await turn
             if (superseded()) return { success: false, superseded: true }
             this._currentDsl = dsl
             this._mediaStep = this._discoverMediaStep(dsl)
