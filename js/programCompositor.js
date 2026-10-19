@@ -76,9 +76,11 @@ export class ProgramCompositor {
 
     /** Easing curve for dissolves / wipes / fades (linear|dipped|sharp|cut). */
     setCurve(name) { this._curve = name }
+    get curve() { return this._curve }
 
     /** Blend mode for the MIX dissolve (mix|add|screen|multiply). */
     setBlend(name) { this._blend = name }
+    get blend() { return this._blend }
 
     /** Render one program frame from the switcher presentation + output state. */
     draw(pres, type, output = {}) {

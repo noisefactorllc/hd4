@@ -20,6 +20,7 @@ import {
     extractEffectsFromDsl,
 } from './noisemaker/bundle.js'
 import { computeFit } from './fit.js'
+import { bindProgramImages, stripMediaUrls } from './programImages.js'
 
 // The longest an engine compile holds up the next one. A compile that never
 // settles (say, after a lost GPU context) must not freeze the channel: past
@@ -80,19 +81,26 @@ export class ChannelRenderer {
      * program on screen. Engine compiles run one at a time, so the newest
      * program is always the last one compiled (unless one is stuck for
      * longer than ENGINE_TURN_LIMIT_MS).
+     *
+     * A program that names images (media(url: "image:<sha256>")) compiles
+     * without the url argument, which the engine does not take, and then
+     * binds each image as its media step's texture (programImages.js). An
+     * image that cannot be found leaves its step empty and is listed in
+     * the result's missingImages.
      */
     async compile(dsl) {
         const seq = ++this._compileSeq
         const superseded = () => seq !== this._compileSeq
         if (!this._initialized) await this.init()
         try {
-            await this._loadEffectsFor(dsl)
+            const engineDsl = stripMediaUrls(dsl)
+            await this._loadEffectsFor(engineDsl)
             if (superseded()) return { success: false, superseded: true }
             // The limit counts from this turn's start, not from when it queued.
             const prior = this._engineTurn
             let timer
             const limit = prior.then(() => new Promise((resolve) => { timer = setTimeout(resolve, ENGINE_TURN_LIMIT_MS) }))
-            const turn = prior.then(() => (superseded() ? null : this._renderer.compile(dsl)))
+            const turn = prior.then(() => (superseded() ? null : this._renderer.compile(engineDsl)))
             const settled = turn
                 .catch(() => { /* the compile reports its own error below */ })
                 .finally(() => clearTimeout(timer))
@@ -102,8 +110,9 @@ export class ChannelRenderer {
             this._currentDsl = dsl
             this._mediaStep = this._discoverMediaStep(dsl)
             this._lastSize = null
+            const missingImages = await bindProgramImages(this._renderer, dsl, extractEffectsFromDsl, () => !superseded())
             if (!this._renderer.isRunning) this._renderer.start()
-            return { success: true }
+            return missingImages.length ? { success: true, missingImages } : { success: true }
         } catch (err) {
             const msg = typeof err === 'string' ? err : err?.message || err?.error || 'compile error'
             this.onError(msg)
@@ -118,10 +127,15 @@ export class ChannelRenderer {
      * gives up its source. Throws if the effects fail to load.
      */
     async check(dsl) {
-        if (!this._initialized) await this.init()
-        await this._loadEffectsFor(dsl)
+        await this.loadEffectsFor(dsl)
         const error = (compileDsl(dsl).diagnostics || []).find((d) => d.severity === 'error')
         return error ? error.message : null
+    }
+
+    /** Load the effects a program names, without compiling it. Throws if they fail to load. */
+    async loadEffectsFor(dsl) {
+        if (!this._initialized) await this.init()
+        await this._loadEffectsFor(dsl)
     }
 
     async _loadEffectsFor(dsl) {

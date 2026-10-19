@@ -27,7 +27,8 @@ export function nearestRatio(v) {
     return best
 }
 
-const RANGES = {
+/** Legal range of each numeric strip parameter, as [min, max]. */
+export const STRIP_RANGES = {
     eqHi: [-15, 15], eqHiFreq: [1000, 20000],
     eqMid: [-15, 15], eqMidFreq: [20, 20000], eqMidQ: [0.5, 16],
     eqLo: [-15, 15], eqLoFreq: [20, 500],
@@ -43,7 +44,7 @@ const BOOLS = new Set(['hpf', 'gate', 'comp', 'compAutoGain', 'followVideo', 'au
 export function clampStripParam(key, value) {
     if (BOOLS.has(key)) return !!value
     if (key === 'compRatio') return nearestRatio(Number(value))
-    const range = RANGES[key]
+    const range = STRIP_RANGES[key]
     if (!range) return value
     const v = Number(value)
     if (Number.isNaN(v)) return STRIP_DEFAULTS[key]

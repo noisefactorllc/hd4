@@ -6,9 +6,9 @@
  * the Settings store; reports changes via callbacks.
  */
 import { THEMES } from '../theme.js'
+import { RESOLUTIONS } from '../settings.js'
 import { registerEscapeable, unregisterEscapeable } from 'handfish'
 
-const RESOLUTIONS = ['640x360', '1280x720', '1920x1080']
 const SHORTCUTS = [
     ['1–4', 'Take channel'],
     ['c / d / w', 'CUT / MIX / WIPE'],
@@ -45,18 +45,17 @@ export function buildSettingsDrawer(container, settings, { onResolution, onFadeT
     header.append(title, closeBtn)
     panel.appendChild(header)
 
-    panel.appendChild(section('Output', [
-        selectRow('hd4-set-resolution', 'Resolution', RESOLUTIONS.map((r) => [r, r]), settings.get('resolution'), (v) => onResolution?.(v)),
-    ]))
-    panel.appendChild(section('Output Fade', [
-        rangeRow('hd4-set-fade', 'Fade time', 0.1, 3, 0.1, settings.get('outputFadeTime'), (v) => onFadeTime?.(v), (v) => `${v.toFixed(1)}s`),
-    ]))
-    panel.appendChild(section('Beat (SYNC)', [
-        rangeRow('hd4-set-beat', 'Sensitivity', 1, 3, 0.1, settings.get('beatSensitivity'), (v) => onBeatSensitivity?.(v), (v) => `${v.toFixed(1)}×`),
-    ]))
-    panel.appendChild(section('Appearance', [
-        selectRow('hd4-set-theme', 'Theme', THEMES.map((t) => [t.value, t.label]), settings.get('theme'), (v) => onTheme?.(v)),
-    ]))
+    // Each row by the setting it shows, so refresh() can re-read the store.
+    const rows = {
+        resolution: selectRow('hd4-set-resolution', 'Resolution', RESOLUTIONS.map((r) => [r, r]), settings.get('resolution'), (v) => onResolution?.(v)),
+        outputFadeTime: rangeRow('hd4-set-fade', 'Fade time', 0.1, 3, 0.1, settings.get('outputFadeTime'), (v) => onFadeTime?.(v), (v) => `${v.toFixed(1)}s`),
+        beatSensitivity: rangeRow('hd4-set-beat', 'Sensitivity', 1, 3, 0.1, settings.get('beatSensitivity'), (v) => onBeatSensitivity?.(v), (v) => `${v.toFixed(1)}×`),
+        theme: selectRow('hd4-set-theme', 'Theme', THEMES.map((t) => [t.value, t.label]), settings.get('theme'), (v) => onTheme?.(v)),
+    }
+    panel.appendChild(section('Output', [rows.resolution]))
+    panel.appendChild(section('Output Fade', [rows.outputFadeTime]))
+    panel.appendChild(section('Beat (SYNC)', [rows.beatSensitivity]))
+    panel.appendChild(section('Appearance', [rows.theme]))
 
     const shortcuts = document.createElement('div')
     shortcuts.className = 'hd4-settings-shortcuts'
@@ -98,7 +97,10 @@ export function buildSettingsDrawer(container, settings, { onResolution, onFadeT
     toggleButton.addEventListener('click', toggle)
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close() })
 
-    return { el: overlay, toggleButton, open, close, toggle, get isOpen() { return overlay.dataset.open === 'true' } }
+    /** Show the store's current values (after a change made outside the drawer). */
+    const refresh = () => { for (const [key, row] of Object.entries(rows)) row.show(settings.get(key)) }
+
+    return { el: overlay, toggleButton, open, close, toggle, refresh, get isOpen() { return overlay.dataset.open === 'true' } }
 }
 
 function section(title, rows) {
@@ -138,6 +140,7 @@ function selectRow(id, label, options, value, onChange) {
     sel.value = value
     sel.addEventListener('change', () => onChange(sel.value))
     row.append(lab, sel)
+    row.show = (v) => { sel.value = v }
     return row
 }
 
@@ -164,5 +167,6 @@ function rangeRow(id, label, min, max, step, value, onChange, fmt) {
         onChange(v)
     })
     row.append(lab, range, readout)
+    row.show = (v) => { range.value = String(v); readout.textContent = fmt(Number(v)) }
     return row
 }

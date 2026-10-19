@@ -44,6 +44,10 @@ export function buildMixerPanel(container, {
         setFader(i, pos) { strips[i].setFader(pos) },
         setMainFader(pos) { main.setFader(pos) },
         setAudioInputs(list) { strips.forEach((s) => s.setAudioInputs(list)) },
+        /** Show a channel's audio source: 'follow' | 'none' | 'device' (+ deviceId). */
+        setAudioSource(i, mode, deviceId = '') { strips[i].setAudioSource(mode, deviceId) },
+        setMonitor(which) { aux.setMonitor(which) },
+        setRecordSource(src) { aux.setRecordSource(src) },
     }
 }
 
@@ -87,6 +91,7 @@ function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource, onEd
         setSoloed(on) { solo.classList.toggle('is-active', on) },
         setFader(pos) { range.value = String(pos) },
         setAudioInputs(list) { audio.updateDevices(list) },
+        setAudioSource(mode, deviceId) { audio.show(mode, deviceId) },
     }
 }
 
@@ -128,7 +133,14 @@ function buildAudioSelect(index, onAudioSource) {
         else if (v.startsWith('device:')) onAudioSource?.(index, 'device', v.slice(7))
     })
 
-    return { el, updateDevices: rebuild }
+    /** Show a source chosen outside the select (an agent command). */
+    function show(mode, deviceId) {
+        const value = mode === 'device' ? `device:${deviceId}` : mode
+        if ([...el.options].some((o) => o.value === value)) el.value = value
+        syncTitle()
+    }
+
+    return { el, updateDevices: rebuild, show }
 }
 
 function buildMainStrip(fader, onMainFader, onEditMain) {
@@ -220,6 +232,8 @@ function buildAuxModule({ onMonitor, onRecordSource }) {
     return {
         el,
         setMeter(v) { fill.style.height = meterHeight(v) },
+        setMonitor(which) { monitoring = which === 'aux'; mon.classList.toggle('is-active', monitoring) },
+        setRecordSource(src) { toAux = src === 'aux'; renderRec() },
     }
 }
 

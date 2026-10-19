@@ -74,6 +74,9 @@ export function buildAutoBar(container, {
         setMatchAudio(on) { sync.classList.toggle('is-active', !!on) },
         /** Reflect a programmatic / audio-SYNC tempo onto the tempo-bar. */
         setBpm(v) { tempo.bpm = v },
+        /** Reflect a mode / bars change made outside the bar (an agent command). */
+        setMode(m) { mode.value = m },
+        setBars(n) { bars.value = String(n) },
         /** Start/stop the tempo-bar's beat animation (kept in lockstep with the clock). */
         startTempo() { tempo.start() },
         stopTempo() { tempo.stop() },

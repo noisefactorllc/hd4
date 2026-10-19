@@ -6,6 +6,10 @@
  * (on every Nth bar, at a downbeat) — or null. "scan" cycles 1→2→3→4→1;
  * "random" picks any other channel. Pure; the app performs the take.
  */
+
+/** The auto-switch modes: beat-driven scan / random, or level-driven. */
+export const AUTO_MODES = ['scan', 'random', 'follows-audio']
+
 export class AutoMix {
     constructor({ channelCount = 4, mode = 'scan', barsPerSwitch = 4, rng = Math.random } = {}) {
         this._channelCount = channelCount
@@ -26,7 +30,7 @@ export class AutoMix {
     setEnabled(v) { this._enabled = !!v }
     toggle() { this._enabled = !this._enabled; return this._enabled }
     setMode(m) { this._mode = AutoMix._normMode(m) }
-    static _normMode(m) { return ['scan', 'random', 'follows-audio'].includes(m) ? m : 'scan' }
+    static _normMode(m) { return AUTO_MODES.includes(m) ? m : 'scan' }
     setBarsPerSwitch(n) { this._barsPerSwitch = Math.max(1, Number(n) || 1) }
 
     /** Include/exclude a channel from the auto rotation. */

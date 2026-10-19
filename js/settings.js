@@ -42,6 +42,9 @@ export class Settings {
     }
 }
 
+/** The program output resolutions the settings drawer offers. */
+export const RESOLUTIONS = ['640x360', '1280x720', '1920x1080']
+
 /** Parse a "WxH" resolution string into { width, height }. */
 export function parseResolution(str) {
     const [w, h] = String(str).split('x').map((n) => parseInt(n, 10))

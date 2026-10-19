@@ -23,7 +23,8 @@ export const MAIN_DEFAULTS = Object.freeze({
     autoMixing: false, // AUTO MIXING global switch
 })
 
-const RANGES = {
+/** Legal range of each numeric main-bus parameter, as [min, max]. */
+export const MAIN_RANGES = {
     mainLimiterThreshold: [-40, 0],
     eqHi: [-15, 15], eqHiFreq: [1000, 20000],
     eqMid: [-15, 15], eqMidFreq: [20, 20000], eqMidQ: [0.5, 16],
@@ -39,7 +40,7 @@ export function clampMainParam(key, value) {
     if (BOOLS.has(key)) return !!value
     if (RATIOS.has(key)) return nearestRatio(Number(value))
     if (key === 'reverbType') return REVERB_TYPES.includes(value) ? value : 'room'
-    const range = RANGES[key]
+    const range = MAIN_RANGES[key]
     if (!range) return value
     const v = Number(value)
     if (Number.isNaN(v)) return MAIN_DEFAULTS[key]

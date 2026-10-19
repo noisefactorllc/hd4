@@ -1,0 +1,813 @@
+# HD4 -- Agent API
+
+> HD4 is a four-channel video switcher with an audio mixer, in the browser.
+> Each channel shows a camera, a video or image file, a pattern or fill from
+> the source library, or a Noisemaker shader program. A program is Noisemaker
+> DSL text that compiles to a render graph. An agent can join the person's own
+> open HD4 over Seance, the Noise Factor collaboration service, and then set
+> channel programs, switch and transition between channels, composite, apply
+> output effects, ride the audio mixer, use memory slots, and look at any
+> monitor. An agent that drives its own browser can use the in-page
+> `window.HD4Agent` API instead. This file is the contract for software agents
+> that control HD4.
+
+The full contract adds a reference for every command and its arguments:
+https://hd4.noisefactor.io/llms-full.txt
+
+The DSL itself (syntax, effects, parameters, surfaces) is specified by the
+Noisemaker contract: https://noisemaker.app/llms-full.txt
+
+The same agent tool controls Noisedeck, Polymorphic and Visualize. Their
+contracts: https://noisedeck.app/llms.txt, https://polymorphic.noisedeck.app/llms.txt,
+https://visualize.noisedeck.app/llms.txt
+
+## Connect to the person's HD4
+
+Use this route when you can run shell commands. It works with the HD4 the
+person already has open: their channels, their monitors, their mix.
+
+1. Ask the person to open https://hd4.noisefactor.io, click the go-online
+   button in the top bar (the Seance logo beside the MIDI button, labelled
+   **Online collaboration**), click **Take Online**, and send you the session
+   link or the six-character code.
+2. Get the agent tool. It needs Node 22.4 or later and nothing else:
+   `curl -fsSLO https://noisedeck.app/agent/seance-agent.mjs`
+3. Join: `node seance-agent.mjs join <link-or-code>`. It prints the session
+   name (`hd4`), the open app tabs and the four channel documents. A
+   background process keeps the session joined between commands.
+
+| Command | What it does |
+|---|---|
+| `node seance-agent.mjs commands` | Lists HD4's commands and their arguments. |
+| `node seance-agent.mjs look [--size N] [--format png\|jpg] [--out FILE]` | Saves an image of the program output. Prints its path. Open the file with your image tool. |
+| `node seance-agent.mjs look --args '{"source":2}'` | Saves an image of channel 2 (`"preview"` is the PVW channel). |
+| `node seance-agent.mjs set <file> --args '{"channel":2}'` | Runs a program on channel 2 (setProgram). Without `--args` it goes to the PVW channel. `-` reads standard input. |
+| `node seance-agent.mjs validate <file>` | Checks a program without running it. |
+| `node seance-agent.mjs call take '{"channel":2}'` | Runs any command with JSON arguments. |
+| `node seance-agent.mjs call getProgram '{"channel":2}'` | Prints one channel's program in an envelope. |
+| `node seance-agent.mjs program --doc channel:2 [--json]` | Prints channel 2's document text. Without `--doc` it prints channel 1. |
+| `node seance-agent.mjs wait --doc channel:2 [--since REV] [--timeout S]` | Waits for the person to change channel 2's program, then prints it. |
+| `node seance-agent.mjs image-put <file>` | Adds a PNG, JPEG, GIF or WebP file to the session. Prints `image:<id>`. |
+| `node seance-agent.mjs transfer <from> <to> --to-args '{"channel":2}'` | Copies a program and its images from one joined session to another, here to HD4 channel 2. With HD4 as the source, `--from-args '{"channel":2}'` picks the channel. |
+| `node seance-agent.mjs leave` / `stop` | Leaves the session / stops the background process. |
+
+Every command prints JSON (`program` prints text). The exit code is 0 for
+success, 1 when HD4 refused the command (read `result.envelope.error.code`),
+and 2 when the tool could not run it (read `error.code`; the codes are listed
+below). `node seance-agent.mjs help` lists every option.
+
+How it works, so you can explain it to the person:
+
+- The tool joins the session as an anonymous participant, which the person
+  sees join. It runs commands in the HD4 tab of the person who took the
+  channels online, through the session, through the same code as their own
+  controls: the panels and the readout show each change. Another HD4 tab that
+  joined the session does not answer.
+- The session holds one document per channel, `channel:1` to `channel:4`. A
+  channel that runs a shader program holds its program text. A channel that
+  shows a camera, a video or an image holds empty text: cameras, video and
+  image files never leave the person's computer.
+- Everyone in the session receives every answer, and anyone who can edit the
+  session can send commands to that tab. So what the person keeps in this
+  browser is not reachable through a session: the memory slots (`listMemory`,
+  `saveMemory`, `recallMemory`), the settings and USER buttons (`getSettings`,
+  `setSettings`, `setUserButton`), stored stills (`captureStill`) and device
+  names (`listDevices`) answer `REMOTE_UNAVAILABLE`. So do the commands that
+  need the person at the browser: camera or microphone permission
+  (`setCameraSource`, `setAudioInput`), a recording download (`setRecording`)
+  and a pop-up window (`openViewport`). `commands` marks them. Suggest that the
+  person goes offline (**Go Offline** in the same dialog) when you are done.
+- `look` asks the person's tab for an image of a monitor. The tab adds the
+  image to the session as its own bytes, and the tool saves it as a file.
+- A session holds at most 32 images, and the person's own images need room
+  too. The tab takes at most 16 images in ten minutes; past that, `look`
+  answers `IMAGE_LIMIT` with `details.retryAfter` in seconds. Look when the
+  mix has changed, not in a loop.
+
+Work with several apps at once: join each app's session (each gets its own
+name, such as `hd4`, `noisedeck` or `visualize`), then name the session in
+each command: `set hd4 prog.dsl --args '{"channel":3}'`, `look noisedeck`,
+`transfer noisedeck hd4 --to-args '{"channel":3}'`. A transfer copies the
+program's images as bytes, so `media(url: "image:<sha256>")` references keep
+working in HD4. HD4 checks the program and refuses one that it cannot compile.
+An HD4 session holds HD4 documents only: other apps cannot join it, and HD4
+joins only sessions that HD4 took online. Programs move between apps through
+the agent tool.
+
+Agent tool errors (exit code 2, `error.code`):
+
+- `NO_SESSION`: no session is joined, or more than one and none was named.
+- `UNKNOWN_SESSION`, `SESSION_LOCKED`, `REFUSED`: the session code is wrong or
+  expired, the session is locked, or the session refused the join.
+- `NO_APP_TAB`: the tab that took the session online did not answer. Ask the
+  person to keep it open, or to go online again and send the new code.
+- `TIMEOUT`: the tab did not answer in time. Check `status`, then try again.
+- `READONLY`: the session lets this agent only read.
+- `SESSION_CLOSED`, `SESSION_REFUSED`: the connection closed, or the session
+  server refused a request (the message says why).
+- `IMAGE_FAILED`, `NO_DOCUMENT`, `USAGE`, `INVALID_JSON`: an image transfer
+  failed, a document is missing, or the command line was wrong.
+
+## Control HD4 in a browser you drive
+
+Use this route when you control a browser yourself. Open
+https://hd4.noisefactor.io/?agent=1. Use the first route your browser tool
+supports:
+
+1. WebMCP: discover the page tools named `hd4_getState`, `hd4_setProgram`,
+   and so on. Each tool has the argument schema below. These call the same API
+   and return its envelope as text. `getThumbnail` also returns an image
+   content block, without duplicating its bytes in text. If your harness
+   serializes the whole tool result, parse it, display the image through your
+   image tool, and print only the text block. Do not print image bytes.
+2. Browser actions: the `HD4 agent` region appears with `agent=1`. Select
+   `Command`, fill `Arguments (JSON)`, and click `Run command`. Read
+   `Command result` and the completion status. `getThumbnail` displays
+   `Command image` and a `Download image` link. This route needs no page
+   JavaScript. Invalid JSON returns `INVALID_JSON`; correct it and run again.
+3. Page JavaScript: call `window.HD4Agent` directly. Wait until the object and
+   method exist. Every command waits for startup automatically; explicitly
+   awaiting `ready` also works. Return the fields you need, not the whole API
+   object.
+
+```js
+const env = await window.HD4Agent.getProgram({ channel: 3 })
+return env.result.dsl
+```
+
+All routes use the same serialized commands and validation. WebMCP
+availability depends on the browser. If discovery returns no tools, use the
+command form. Do not try to bypass a browser tool's read-only JavaScript
+policy. A tool that only fetches HTML cannot run HD4. A browser is required.
+Channel 1 starts on the default camera, so the browser can ask for camera
+permission when HD4 opens.
+
+---
+
+## Channels, preview and program
+
+- Channels are numbered 1 to 4. `state.program.live` is the channel on
+  program (PGM), the output. `state.program.preview` is the channel queued on
+  preview (PVW).
+- `setProgram`, `getProgram`, `setSource` and `setCameraSource` act on the PVW
+  channel when you omit `channel`, like the person's Cmd/Ctrl+V paste. Check a
+  new program on preview, then `take` it to program.
+- `take` without `channel` takes the PVW channel, and the outgoing program
+  returns to PVW. `take({ channel: 3 })` takes channel 3 and leaves PVW alone.
+  `transition: "auto"` (the default) uses the selected transition type and
+  time; `transition: "cut"` switches at once, also during a transition. An
+  `auto` take is refused while a transition runs; read
+  `state.program.transitioning`.
+- `setSource` shows a pattern or fill from the source library (`Color Bars`,
+  `Checkerboard`, `Grid`, `UV Map`, `Dot Grid`, `Color Grid`, `Black`,
+  `White`, `Red`, `Green`, `Blue`, `Amber`) or `still`, the still captured in
+  this page (with the STILL button or `captureStill`).
+- `getThumbnail` shows the program output by default. `source: "preview"`
+  shows the PVW channel, and `source: 1` to `4` shows that channel.
+
+## Write a program
+
+1. Find effects with `searchEffects`. Read their parameters with `getEffectDefinition`.
+2. Write the program. Copy each parameter name from `getEffectDefinition`. Do not guess names.
+   `choices` lists accepted values. For a `member` parameter, insert its value as a DSL
+   member expression, such as `palette.hypercolor`, without quotes.
+3. Check it with `validateProgram`. Fix every diagnostic with severity `error`.
+4. Run it with `setProgram`. Look at the channel with `getThumbnail`
+   (`source` set to the channel), then `take` it to program.
+5. To change one parameter, edit its argument in the program text and run the
+   program again.
+
+```js
+const A = window.HD4Agent
+const dsl = [
+    'search synth, mixer',
+    'noise(ridges: true).write(o0)',
+    'gradient().blendMode(tex: read(o0), mode: overlay, mix: 25).write(o1)',
+    'render(o1)',
+].join('\n')
+const check = await A.validateProgram({ dsl })
+if (!check.result.valid) return check.result.diagnostics
+const run = await A.setProgram({ dsl, channel: 2 })
+if (!run.ok) return run.error
+const taken = await A.take({ channel: 2 })
+return taken.result
+```
+
+DSL rules that agents most often get wrong:
+
+- The first line `search ns1, ns2` sets the namespaces that effect names resolve in, in order.
+  The same function name can mean different effects in different namespaces,
+  with different parameters.
+- Every chain ends with `.write(oN)`. The program ends with `render(oN)`.
+- Read another surface with `read(oN)`, for example `tex: read(o0)`.
+- Noisemaker 1.0.289 retired all old parameter aliases. Older examples use names
+  such as `mixAmt`, `noiseType` or `loopAmp`. Those now fail with
+  `S001 Unknown argument`. `getEffectDefinition` gives the current names.
+- An image is `media(url: "image:<sha256>")`, the SHA-256 of the image's
+  bytes. HD4 finds the image in the Seance session (add one with the agent
+  tool's `image-put`) or in images it already holds. A program whose image is
+  missing still runs, its media step stays empty, and the envelope carries an
+  `IMAGE_UNAVAILABLE` warning.
+
+## Run the mix
+
+- `setTransition`: type `cut`, `mix` or `wipe`, time 0 to 4 seconds, fade
+  curve, MIX blend mode.
+- `setComposition`: `off`, `pinp`, `split` or `quad`, with the PinP inset
+  (source, size, shape, aspect, border, position, crop) and the SPLIT
+  parameters. `setKey`: the chroma or luma KEY overlay over the program.
+- `setOutput`: FREEZE, OUTPUT FADE (fade to black) and the output VFX filter.
+  `captureStill` grabs the program as a still (in a browser you drive).
+- `setAuto`: beat-synced auto-switching (scan, random or follows-audio), bars
+  per switch, tempo, and SYNC to the audio.
+- `setAudioChannel` and `setAudioMain`: faders, mute, solo, each channel's
+  audio source and processing, the main bus, monitoring and the recording
+  source. `getControls({ section: "audio" })` reads them all.
+- In a browser you drive: `listMemory`, `saveMemory` and `recallMemory` use the
+  eight memory slots with the full mixer state (a save replaces what the slot
+  held); `getSettings` and `setSettings` read and set the output resolution,
+  OUTPUT FADE time, beat sensitivity and theme; `setUserButton` assigns the
+  USER buttons. Through a session, ask the person to use MEM, the settings
+  drawer and the USER buttons.
+- Omitted fields keep their value in every `set...` command.
+
+What only the person can do: choose a video or image file (a file picker; an
+agent shows images through `media(url: "image:<sha256>")` programs instead),
+paste from the clipboard (`setProgram` does the same), pair Noisedeck Sync
+output (its dialog), and set up MIDI (it needs their controller). The
+reference marks every command that a session cannot run.
+
+---
+
+## Keep results small
+
+Your browser tool sends each script result back to you.
+A large result uses a large part of your context.
+
+- Return only the fields that you need from each script.
+- Every envelope includes `state`. Remove it when you do not need it.
+- Direct JavaScript `getThumbnail` returns base64 image data. Keep `maxDimension` small.
+  WebMCP and the command form display the image separately and omit bytes from text.
+- The agent tool saves images as files and prints only their paths. Open a file
+  with your image tool; do not print its bytes.
+- The agent tool removes `state` from envelopes. Add `--state` to keep it.
+- `getControls` returns one section at a time. Ask only for the section you need.
+
+---
+
+## The envelope
+
+Every command response, success or failure, has this shape:
+
+```js
+// success
+{ ok: true, command: "setProgram", apiVersion: "1.0", result: { /* command-specific */ }, state: { /* snapshot */ } }
+
+// failure
+{
+    ok: false,
+    command: "setProgram",
+    apiVersion: "1.0",
+    error: { code: "INVALID_PROGRAM", message: "...", details: { diagnostics: [ /* ... */ ] } },
+    state: { /* snapshot */ }
+}
+```
+
+A success can carry `warnings`, a list of `{ code, message, ... }`. The one
+warning is `IMAGE_UNAVAILABLE` (with `imageIds`): the program runs, but the
+images it names are not in the session or the page.
+
+Commands run one at a time, in the order you call them.
+You can omit the argument object: `getState()` is the same as `getState({})`.
+Every command rejects an argument that it does not declare, so a command
+with no arguments accepts only `{}`.
+
+---
+
+## State snapshot
+
+```
+state: {
+    schemaVersion,
+    program:     { live, preview, transitioning },   // live: the PGM channel; preview: the PVW channel
+    channels:    [ { channel, source, name, chars, running } ],
+                                         // source: "shader", "camera", "video", "image" or "none"
+                                         // chars: program length; running: the program compiled and runs
+    transition:  { type, time, curve, blend },
+    composition: { mode, key },          // mode: "off", "pinp", "split" or "quad"; key: the KEY overlay is on
+    output:      { freeze, fade, vfx, recording, width, height },
+                                         // fade: fading to or holding black; width, height: the program output
+    auto:        { on, mode, bars, bpm },
+    online:      { status, session }     // status: "offline", "connecting", "online" or "readonly"
+}
+```
+
+---
+
+## Diagnostics
+
+`validateProgram` and a failed `setProgram` return compiler diagnostics:
+
+```js
+{ code: "S001", severity: "error", message: "Unknown argument 'mixAmt' for blendMode()", location?: { line, column } }
+```
+
+A syntax error has code `SYNTAX`. Diagnostics with severity `warning` do not stop a program.
+
+---
+
+## Error codes
+
+| Code | When |
+|---|---|
+| `INVALID_JSON` | the command form arguments are not valid JSON |
+| `INVALID_ARGS_TYPE` | wrong argument type |
+| `INVALID_ARGS_REQUIRED` | missing required argument |
+| `INVALID_ARGS_RANGE` | number or string length out of range |
+| `INVALID_ARGS_ENUM` | value not in the allowed list |
+| `INVALID_ARGS_UNKNOWN` | an argument that the command does not declare |
+| `INVALID_PROGRAM` | the program does not compile. `details.diagnostics` lists the errors. Nothing changed |
+| `COMPILE_FAILED` | the channel could not show the program or source. It shows its previous source again |
+| `CONFLICT_CHANNEL_CHANGED` | another change took the channel while the new source started. The channel shows that change |
+| `CONFLICT_TRANSITION_RUNNING` | an `auto` take while a transition runs. Nothing changed |
+| `NOT_FOUND_EFFECT` | unknown effect id |
+| `NOT_FOUND_STILL` | `setSource` with `still` before any still was captured |
+| `NOT_FOUND_MEMORY` | `recallMemory` on an empty slot |
+| `NOT_FOUND_COMMAND` | the session asked for a command that HD4 does not have |
+| `EFFECT_LOAD_FAILED` | an effect could not load from the CDN |
+| `DEVICE_FAILED` | the camera did not start (no camera, or no permission). The channel shows its previous source again |
+| `MEMORY_SAVE_FAILED` | the browser refused to store the memory slot. The slot keeps what it held |
+| `REMOTE_UNAVAILABLE` | the command needs the person at the browser or reads or changes what this browser keeps, and came through a session |
+| `IMAGE_LIMIT` | the tab already took 16 images in ten minutes. `details.retryAfter` is in seconds |
+| `IMAGE_UPLOAD_FAILED` | the tab could not add an image to the session (the session holds up to 32 images) |
+| `INTERNAL_ERROR` | unexpected failure |
+
+---
+
+## Pointers
+
+- Full command reference: https://hd4.noisefactor.io/llms-full.txt
+- DSL and effect contract: https://noisemaker.app/llms-full.txt
+- Agent tool: https://noisedeck.app/agent/seance-agent.mjs (`node seance-agent.mjs help`)
+- Source of truth in the page: `/js/agent/index.js` (registration), `/js/agent/commands.js`
+  (handlers), `/js/agent/schemas.js` (argument schemas), `/js/agent/descriptions.js`
+  (command descriptions), `/js/agent/relay.js` (the session relay)
+
+---
+
+## Command reference
+
+HD4 has 31 commands. Call a command as `await window.HD4Agent.<name>(args)`,
+as the WebMCP tool `hd4_<name>`, or through a Seance session with the agent tool.
+Every command rejects an argument that it does not declare, with `INVALID_ARGS_UNKNOWN`.
+
+### Read state
+
+#### `getState`
+
+Returns the state snapshot. Every envelope already includes it in `state`.
+
+Returns: the snapshot.
+
+Arguments: none.
+
+#### `getProgram`
+
+Returns the program text of one channel and whether it is the program that runs. A channel that shows a camera, a video, an image or nothing has no program text. `channel` defaults to the PVW channel.
+
+Returns: `{ channel, source, dsl, running }`, where `source` is `shader`, `camera`, `video`, `image` or `none`.
+
+Arguments:
+
+- `channel`: integer, from 1 to 4
+
+#### `getControls`
+
+Returns every parameter of one section of the live mixer: `channels` (sources, fit, AUTO rotation, whether a still was captured), `composition` (PinP, SPLIT and KEY parameters), `audio` (strips, main bus, monitor, record source) or `auto` (auto-switching and tempo).
+
+Returns: `{ section, ... }` with the section's values.
+
+Arguments:
+
+- `section` (required): string, one of `channels`, `composition`, `audio`, `auto`
+
+### Programs
+
+#### `validateProgram`
+
+Compiles `dsl` without applying it.
+
+Returns: `{ valid, diagnostics }`.
+
+Arguments:
+
+- `dsl` (required): string, at least 1 character, at most 65536 characters
+
+#### `setProgram`
+
+Compiles `dsl` and makes it the shader source of one channel, like a pasted program. `channel` defaults to the PVW channel, so a new program can be checked on preview before a take. A program that does not compile changes nothing and fails with INVALID_PROGRAM. A channel that showed a camera, a video or an image stops it.
+
+Returns: `{ applied: true, channel, diagnostics }` (warnings only).
+
+Arguments:
+
+- `dsl` (required): string, at least 1 character, at most 65536 characters
+- `channel`: integer, from 1 to 4
+
+### Effects
+
+#### `searchEffects`
+
+Lists effects whose id, description or tags contain `query`. `namespace` keeps one namespace.
+
+Returns: `{ total, effects: [{ effectId, namespace, name, description, tags }] }`.
+
+Arguments:
+
+- `query`: string
+- `namespace`: string
+- `limit`: integer, from 1 to 500, default `50`
+
+#### `getEffectDefinition`
+
+Returns the DSL function name and the parameters of one effect.
+
+Returns: `{ effectId, func, namespace, description, params: [{ name, type, default, min?, max?, enum?, choices?, label? }] }`.
+
+Arguments:
+
+- `effectId` (required): string, at least 1 character
+
+### Channels
+
+#### `setSource`
+
+Shows a pattern or a fill from the source library on a channel, or `still`, the still captured in this page (see captureStill). `channel` defaults to the PVW channel.
+
+Returns: `{ channel, source, name }`.
+
+Arguments:
+
+- `channel`: integer, from 1 to 4
+- `source` (required): string, one of `Color Bars`, `Checkerboard`, `Grid`, `UV Map`, `Dot Grid`, `Color Grid`, `Black`, `White`, `Red`, `Green`, `Blue`, `Amber`, `still`
+
+#### `setChannelOptions`
+
+Sets how a camera, video or image fills the channel (`cover` crops, `contain` scales) and whether the channel takes part in the AUTO rotation.
+
+Returns: `{ channel, fit, autoInclude }`.
+
+Arguments:
+
+- `channel` (required): integer, from 1 to 4
+- `fit`: string, one of `cover`, `contain`
+- `autoInclude`: boolean
+
+#### `listDevices`
+
+Lists the cameras and audio inputs the browser reports, with their device ids for setCameraSource and setAudioInput. Names can be empty until the person allows camera or microphone access.
+
+Returns: `{ cameras: [{ deviceId, label }], audioInputs: [{ deviceId, label }] }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments: none.
+
+#### `setCameraSource`
+
+Shows a camera on a channel. `deviceId` picks a camera (see listDevices); empty or omitted is the default camera. The browser can ask the person for camera permission. `channel` defaults to the PVW channel.
+
+Returns: `{ channel, source: "camera", deviceId }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments:
+
+- `channel`: integer, from 1 to 4
+- `deviceId`: string
+
+### Switching
+
+#### `setPreview`
+
+Queues a channel on the PVW (preview) monitor.
+
+Returns: `{ live, preview, transitioning }`.
+
+Arguments:
+
+- `channel` (required): integer, from 1 to 4
+
+#### `take`
+
+Takes a channel to program. Without `channel` it takes the PVW channel, and the outgoing program returns to PVW, like the TAKE (`cut`) and AUTO (`auto`) buttons. With `channel` it takes that channel and leaves PVW alone, like the program bus buttons. `auto` uses the selected transition type and time; `cut` switches at once, also during a transition. An `auto` take while a transition runs fails with CONFLICT_TRANSITION_RUNNING.
+
+Returns: `{ live, preview, transitioning }`.
+
+Arguments:
+
+- `channel`: integer, from 1 to 4
+- `transition`: string, one of `auto`, `cut`, default `auto`
+
+#### `setTransition`
+
+Sets the transition type (`cut`, `mix`, `wipe`), its time in seconds, the fade curve (also used by OUTPUT FADE) and the MIX blend mode. Omitted fields keep their value.
+
+Returns: `{ type, time, curve, blend }`.
+
+Arguments:
+
+- `type`: string, one of `cut`, `mix`, `wipe`
+- `time`: number, from 0 to 4
+- `curve`: string, one of `linear`, `dipped`, `sharp`, `cut`
+- `blend`: string, one of `mix`, `add`, `screen`, `multiply`
+
+#### `setAuto`
+
+Sets beat-synced auto-switching: AUTO on or off, the mode (`scan`, `random`, `follows-audio`), bars per switch, the tempo in BPM, and SYNC (match the tempo to the audio). Omitted fields keep their value.
+
+Returns: `{ on, mode, bars, bpm, matchAudio }`.
+
+Arguments:
+
+- `on`: boolean
+- `mode`: string, one of `scan`, `random`, `follows-audio`
+- `bars`: integer, from 1 to 32
+- `bpm`: number, from 40 to 300
+- `matchAudio`: boolean
+
+### Composition
+
+#### `setComposition`
+
+Sets the composition type (`off`, `pinp`, `split`, `quad`) and the PinP and SPLIT parameters. Positions run from -50 (left or top) through 0 (centre) to 50. Omitted fields keep their value.
+
+Returns: `{ mode, pinp, split }`.
+
+Arguments:
+
+- `mode`: string, one of `off`, `pinp`, `split`, `quad`
+- `pinp`: object, with any of these fields
+  - `source`: integer, from 1 to 4
+  - `size`: string, one of `1/2`, `1/3`, `1/4`
+  - `aspect`: string, one of `16:9`, `1:1`
+  - `shape`: string, one of `square`, `diamond`, `circle`, `heart`
+  - `borderWidth`: integer, from 0 to 15
+  - `borderColor`: string, one of `black`, `white`, `gray`, `red`, `green`, `blue`, `yellow`
+  - `hPosition`: number, from -50 to 50
+  - `vPosition`: number, from -50 to 50
+  - `hCropping`: number, from 1 to 100
+  - `vCropping`: number, from 1 to 100
+  - `hViewPosition`: number, from -50 to 50
+  - `vViewPosition`: number, from -50 to 50
+- `split`: object, with any of these fields
+  - `sourceB`: integer, from 1 to 4
+  - `pattern`: string, one of `v-center`, `h-center`, `v-stretch`, `h-stretch`
+  - `aCenter`: number, from 0 to 100
+  - `bCenter`: number, from 0 to 100
+  - `centerPosition`: number, from -50 to 50
+
+#### `setKey`
+
+Sets the KEY overlay: on or off, `chroma` or `luma`, its source (a channel or `still`), LEVEL and GAIN (0 to 255) and the key colour. Turning the key on with no source keys channel 1. Omitted fields keep their value.
+
+Returns: `{ on, type, source, level, gain, chromaColor, lumaColor }`, where `source` is a channel, `still` or `null`.
+
+Arguments:
+
+- `on`: boolean
+- `type`: string, one of `chroma`, `luma`
+- `source`: integer or string, one of `1`, `2`, `3`, `4`, `still`
+- `level`: integer, from 0 to 255
+- `gain`: integer, from 0 to 255
+- `chromaColor`: string, one of `green`, `blue`
+- `lumaColor`: string, one of `white`, `black`
+
+### Output
+
+#### `setOutput`
+
+Sets FREEZE (hold the program frame), OUTPUT FADE (fade the program to black over the fade time) and the output VFX filter. Omitted fields keep their value.
+
+Returns: `{ freeze, fade, vfx }`, where `fade` is true while the output fades to or holds black.
+
+Arguments:
+
+- `freeze`: boolean
+- `fade`: boolean
+- `vfx`: string, one of `none`, `negative`, `mono`, `sepia`, `posterize`, `emboss`, `edges`
+
+#### `captureStill`
+
+Captures the program as a still, like the STILL button. The still becomes the KEY source `still` and the channel source `still`. HD4 also keeps its bytes in this browser, as the STILL button does, so memory slots can name it.
+
+Returns: `{ captured, width, height }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments: none.
+
+#### `setRecording`
+
+Starts or stops recording the program and its audio. Stopping saves the recording as a browser download.
+
+Returns: `{ recording }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments:
+
+- `recording` (required): boolean
+
+#### `openViewport`
+
+Opens the program in a window for a secondary display, or focuses it. A pop-up blocker can refuse it.
+
+Returns: `{ open }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments: none.
+
+### Audio
+
+#### `setAudioChannel`
+
+Sets one channel strip: fader (0 to 1), mute, solo, its audio source (`follow` the video, or `none`) and its processing (`strip`: high-pass filter, 3-band EQ, gate, compressor, pan, delay, AUX and reverb sends, auto-audio). Omitted fields keep their value.
+
+Returns: `{ channel, fader, mute, solo, source }`.
+
+Arguments:
+
+- `channel` (required): integer, from 1 to 4
+- `fader`: number, from 0 to 1
+- `mute`: boolean
+- `solo`: boolean
+- `source`: string, one of `follow`, `none`
+- `strip`: object, with any of these fields
+  - `hpf`: boolean
+  - `eqHi`: number, from -15 to 15
+  - `eqHiFreq`: number, from 1000 to 20000
+  - `eqMid`: number, from -15 to 15
+  - `eqMidFreq`: number, from 20 to 20000
+  - `eqMidQ`: number, from 0.5 to 16
+  - `eqLo`: number, from -15 to 15
+  - `eqLoFreq`: number, from 20 to 500
+  - `gate`: boolean
+  - `gateThreshold`: number, from -80 to 0
+  - `gateAttack`: number, from 0.5 to 200
+  - `gateRelease`: number, from 30 to 5000
+  - `comp`: boolean
+  - `compThreshold`: number, from -60 to 0
+  - `compRatio`: number, from 1 to 100
+  - `compAttack`: number, from 0.2 to 100
+  - `compRelease`: number, from 30 to 5000
+  - `compMakeup`: number, from -40 to 40
+  - `compAutoGain`: boolean
+  - `pan`: number, from -1 to 1
+  - `delay`: number, from 0 to 500
+  - `auxSend`: number, from -60 to 10
+  - `revSend`: number, from -60 to 10
+  - `followVideo`: boolean
+  - `autoMixEnabled`: boolean
+  - `autoMixWeight`: number, from 0 to 100
+
+#### `setAudioMain`
+
+Sets the main fader (0 to 1), what the speakers monitor (`main` or the `aux` mix), what a recording captures (`program` or `aux`), and the main bus (`bus`: mute, limiter, EQ, reverb, multiband compressor, AUX bus, AUTO MIXING). Omitted fields keep their value.
+
+Returns: `{ fader, monitor, recordSource }`.
+
+Arguments:
+
+- `fader`: number, from 0 to 1
+- `monitor`: string, one of `main`, `aux`
+- `recordSource`: string, one of `program`, `aux`
+- `bus`: object, with any of these fields
+  - `mainMute`: boolean
+  - `mainLimiter`: boolean
+  - `mainLimiterThreshold`: number, from -40 to 0
+  - `eqHi`: number, from -15 to 15
+  - `eqHiFreq`: number, from 1000 to 20000
+  - `eqMid`: number, from -15 to 15
+  - `eqMidFreq`: number, from 20 to 20000
+  - `eqMidQ`: number, from 0.5 to 16
+  - `eqLo`: number, from -15 to 15
+  - `eqLoFreq`: number, from 20 to 500
+  - `reverbReturn`: number, from -60 to 10
+  - `reverbTime`: number, from 0 to 5
+  - `reverbType`: string, one of `room`, `hall`
+  - `mbComp`: boolean
+  - `mbHiThres`: number, from -40 to 0
+  - `mbMidThres`: number, from -40 to 0
+  - `mbLoThres`: number, from -40 to 0
+  - `mbHiRatio`: number, from 1 to 100
+  - `mbMidRatio`: number, from 1 to 100
+  - `mbLoRatio`: number, from 1 to 100
+  - `auxMute`: boolean
+  - `auxLevel`: number, from -60 to 10
+  - `auxDelay`: number, from 0 to 500
+  - `autoMixing`: boolean
+
+#### `setAudioInput`
+
+Uses an audio input device as a channel's audio source. `deviceId` empty or omitted is the default input. The browser can ask the person for microphone permission.
+
+Returns: `{ channel, source }`, where `source` is `device`, or `none` when the input did not start.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments:
+
+- `channel` (required): integer, from 1 to 4
+- `deviceId`: string
+
+### Memory
+
+#### `listMemory`
+
+Lists the eight memory slots, which this browser keeps.
+
+Returns: `{ slots: [{ slot, occupied }] }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments: none.
+
+#### `saveMemory`
+
+Saves the full mixer state to a memory slot, replacing what the slot held. A slot keeps channel sources, fit, PVW, the program channel, transition, VFX, composition and audio.
+
+Returns: `{ saved: true, slot }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments:
+
+- `slot` (required): integer, from 1 to 8
+
+#### `recallMemory`
+
+Recalls a memory slot. A source that cannot start (a camera without permission) falls back on its channel.
+
+Returns: `{ recalled: true, slot }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments:
+
+- `slot` (required): integer, from 1 to 8
+
+### Settings
+
+#### `getSettings`
+
+Returns the settings this browser keeps (output resolution, OUTPUT FADE time, SYNC beat sensitivity, theme), the USER button assignments and the actions a USER button can take.
+
+Returns: `{ settings, userButtons: [{ button, action }], actions: [{ id, label }] }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments: none.
+
+#### `setSettings`
+
+Sets the program output resolution, the OUTPUT FADE time in seconds, the SYNC beat sensitivity and the theme. The settings persist in this browser. Omitted fields keep their value.
+
+Returns: every setting.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments:
+
+- `resolution`: string, one of `640x360`, `1280x720`, `1920x1080`
+- `outputFadeTime`: number, from 0.1 to 3
+- `beatSensitivity`: number, from 1 to 3
+- `theme`: string, one of `neutral-dark`, `gray-dark`, `ocean`, `dusk`, `sunset`, `terminal`
+
+#### `setUserButton`
+
+Assigns an action to a USER button (1 to 5), or `none`. The assignment persists in this browser.
+
+Returns: `{ button, action }`.
+
+Through a Seance session: not available (`REMOTE_UNAVAILABLE`). It needs the person at the browser, or it reads or changes what this browser keeps.
+
+Arguments:
+
+- `button` (required): integer, from 1 to 5
+- `action` (required): string, one of `take:1`, `take:2`, `take:3`, `take:4`, `cut`, `mix`, `wipe`, `quad`, `pinp`, `split`, `key`, `freeze`, `fade`, `still`, `record`, `auto`, `mem:1`, `mem:2`, `mem:3`, `mem:4`, `mem:5`, `mem:6`, `mem:7`, `mem:8`, `none`
+
+### Images
+
+#### `getThumbnail`
+
+Returns an image of the program output (`program`), of the PVW channel (`preview`) or of channel 1 to 4. Through a Seance session the image is added to the session as its own bytes, and `image` replaces `bytes`.
+
+Returns: `{ bytes, mimeType, width, height, source, channel }`, with `bytes` in base64 and `channel` the channel shown (`null` for the program output). Through a session: `{ image: { id, mimeType, bytes }, mimeType, width, height, source, channel }`, where `image.bytes` is the byte count.
+
+Arguments:
+
+- `maxDimension`: integer, from 16 to 1024, default `256`
+- `format`: string, one of `png`, `jpg`, default `jpg`
+- `source`: string or integer, one of `program`, `preview`, `1`, `2`, `3`, `4`, default `program`

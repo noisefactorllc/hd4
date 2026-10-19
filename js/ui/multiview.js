@@ -33,6 +33,8 @@ export function buildMultiview(container, channels, {
                 // The renderer holds the fit mode; keep the toggle in step with
                 // it (a memory recall restores it directly on the renderer).
                 t.updateFit(getFit ? getFit(i) : 'cover')
+                // AutoMix holds the AUTO rotation; an agent can change it too.
+                if (getAutoInclude) t.updateAutoInclude(getAutoInclude(i))
             })
         },
         setCameras(list) {
@@ -80,6 +82,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
         syncSelect(source) { picker.sync(source) },
         setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
         updateFit(mode) { fit.update(mode) },
+        updateAutoInclude(on) { auto.update(on) },
         updateCameras(list) { picker.updateCameras(list) },
         setStillAvailable(on) { picker.setStillAvailable(on) },
     }
@@ -261,7 +264,11 @@ function buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude) {
         render()
         onSetAutoInclude?.(index, included)
     })
-    return { el }
+    return {
+        el,
+        /** Sync the toggle with AutoMix's rotation. */
+        update(on) { included = on !== false; render() },
+    }
 }
 
 /** Toggle a media channel between zoom/crop (cover) and scale (contain). */

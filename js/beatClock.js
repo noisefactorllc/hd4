@@ -9,8 +9,8 @@
  * drives tick() from its frame loop and an audio detector can re-anchor
  * the phase. Mirrors visualize's bpm.js.
  */
-const MIN_BPM = 40
-const MAX_BPM = 300
+export const MIN_BPM = 40
+export const MAX_BPM = 300
 const TAP_RESET_MS = 2000
 
 export function computeBarSeconds(bpm, divider = 1) {

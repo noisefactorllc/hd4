@@ -18,13 +18,13 @@
 // tooltip initializer for the industrial top bar. initEscapeHandler wires the
 // global Escape handler for the handfish escape stack the overlay panels
 // register with (once at boot; double-registration corrupts close ordering).
-import { AboutDialog, initializeTooltips, initEscapeHandler } from 'handfish'
+import { AboutDialog, initializeTooltips, initEscapeHandler, SEANCE_LOGO_SVG } from 'handfish'
 import { logoSvg } from './ui/logo.js'
 import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
 import { makeChannelDriverFactory } from './sources/driverFactory.js'
 import { createSource } from './sources/sourceModel.js'
-import { presetByName } from './sources/presets.js'
+import { presetByDsl, presetByName } from './sources/presets.js'
 import { listCameras } from './sources/cameras.js'
 import { listAudioInputs } from './audioDevices.js'
 import { buildMultiview } from './ui/multiview.js'
@@ -41,7 +41,7 @@ import { Recorder, recordingFilename } from './recorder.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
-import { attachProgramPaste, createProgramPaste } from './programPaste.js'
+import { CUSTOM_PROGRAM_NAME, attachProgramPaste, createProgramPaste } from './programPaste.js'
 import { BeatClock } from './beatClock.js'
 import { AutoMix } from './autoMix.js'
 import { pickLoudest } from './audio/autoAudio.js'
@@ -68,6 +68,9 @@ import { ProgramExportQueue } from './programExportQueue.js'
 import { ViewportWindow } from './viewportWindow.js'
 import { SyncOutputController, createSyncOutputConnectionProvider, deriveSyncOutputView } from './syncOutput.js'
 import { createSyncOutputDialog } from './syncOutputDialog.js'
+import { createHD4OnlineCollaboration } from './onlineCollaboration.js'
+import { stripMediaUrls } from './programImages.js'
+import { bootstrapAgent, createSeanceAgentSocket, markAgentReady } from './agent/index.js'
 
 const VERSION = '0.1.0'
 const CHANNEL_COUNT = 4
@@ -179,10 +182,13 @@ async function bootInto({ container = null, audioContext = null, destination = n
     //     between the output group and the cluster. ---
     const topbar = byId('hd4-topbar')
     topbar.classList.add('hf-topbar')
+    const toggleFreeze = () => { output.toggleFreeze(); showParam('FREEZE', output.freeze ? 'ON' : 'OFF') }
+    const toggleFade = () => { output.toggleFade(now()); showParam('FADE', output.faded ? 'ON' : 'OFF') }
+    const setVfx = (name) => { output.setVfx(name); showParam('VFX', String(name).toUpperCase()) }
     const outputBar = buildOutputBar(topbar, {
-        onFreeze: () => { output.toggleFreeze(); showParam('FREEZE', output.freeze ? 'ON' : 'OFF') },
-        onFade: () => { output.toggleFade(now()); showParam('FADE', output.faded ? 'ON' : 'OFF') },
-        onVfx: (name) => { output.setVfx(name); showParam('VFX', String(name).toUpperCase()) },
+        onFreeze: toggleFreeze,
+        onFade: toggleFade,
+        onVfx: setVfx,
         onStill: () => captureStill(),
         onRecord: () => toggleRecording(),
         onViewport: () => openViewport(),
@@ -262,7 +268,9 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // Open, or focus the open window. As in Noisedeck, the button never closes
     // a live secondary display: closing the window detaches it.
     function openViewport() {
-        showParam('VIEWPORT', viewportWindow.open() ? 'ON' : 'BLOCKED')
+        const opened = Boolean(viewportWindow.open())
+        showParam('VIEWPORT', opened ? 'ON' : 'BLOCKED')
+        return opened
     }
 
     // Noisedeck Sync: publish the program through the local Sync companion.
@@ -307,14 +315,18 @@ async function bootInto({ container = null, audioContext = null, destination = n
     syncComposition()
 
     // --- Transition bar ---
+    const setTransitionType = (t) => { switcher.setType(t); showParam('XFADE', String(t).toUpperCase()) }
+    const setTransitionTime = (s) => { switcher.setTime(s); showParam('TIME', `${s.toFixed(1)}s`) }
+    const setCurve = (c) => { compositor.setCurve(c); showParam('CURVE', String(c).toUpperCase()) }
+    const setBlend = (b) => { compositor.setBlend(b); showParam('BLEND', String(b).toUpperCase()) }
     const transitionBar = buildTransitionBar(byId('hd4-transition'), {
         initialType: switcher.type,
         initialTime: switcher.time,
         initialCurve: 'dipped',
-        onType: (t) => { switcher.setType(t); showParam('XFADE', String(t).toUpperCase()) },
-        onTime: (s) => { switcher.setTime(s); showParam('TIME', `${s.toFixed(1)}s`) },
-        onCurve: (c) => { compositor.setCurve(c); showParam('CURVE', String(c).toUpperCase()) },
-        onBlend: (b) => { compositor.setBlend(b); showParam('BLEND', String(b).toUpperCase()) },
+        onType: setTransitionType,
+        onTime: setTransitionTime,
+        onCurve: setCurve,
+        onBlend: setBlend,
     })
 
     // --- Auto-mixing + beat matching ---
@@ -340,26 +352,31 @@ async function bootInto({ container = null, audioContext = null, destination = n
         const target = autoMix.onBeat(beat, switcher.live)
         if (target) switcher.take(target, t)
     }
+    const toggleAuto = () => {
+        const on = autoMix.toggle()
+        if (on) autoMix.reset(beatClock.beatIndex)
+        autoBar.setEnabled(on)
+    }
+    // TAP + manual BPM edits surface through the tempo-bar's `change`
+    // event: re-tempo the switching clock and re-anchor its phase so the
+    // beat grid that drives AUTO follows the tempo-bar.
+    const setTempo = (bpm) => { beatClock.setBpm(bpm); beatClock.resetPhase(now()); showParam('TEMPO', `${Math.round(bpm)} BPM`) }
+    const setAutoMode = (m) => { autoMix.setMode(m); showParam('MODE', String(m).toUpperCase()) }
+    const setAutoBars = (n) => { autoMix.setBarsPerSwitch(n); showParam('BARS', String(n)) }
+    const toggleMatchAudio = () => {
+        matchAudio = !matchAudio
+        if (matchAudio) beatDetect.reset()
+        autoBar.setMatchAudio(matchAudio)
+    }
     const autoBar = buildAutoBar(byId('hd4-transition'), {
         initialBpm: beatClock.bpm,
         initialBars: autoMix.barsPerSwitch,
         initialMode: autoMix.mode,
-        onToggle: () => {
-            const on = autoMix.toggle()
-            if (on) autoMix.reset(beatClock.beatIndex)
-            autoBar.setEnabled(on)
-        },
-        // TAP + manual BPM edits surface through the tempo-bar's `change`
-        // event: re-tempo the switching clock and re-anchor its phase so the
-        // beat grid that drives AUTO follows the tempo-bar.
-        onTempoChange: (bpm) => { beatClock.setBpm(bpm); beatClock.resetPhase(now()); showParam('TEMPO', `${Math.round(bpm)} BPM`) },
-        onMode: (m) => { autoMix.setMode(m); showParam('MODE', String(m).toUpperCase()) },
-        onBars: (n) => { autoMix.setBarsPerSwitch(n); showParam('BARS', String(n)) },
-        onMatchAudio: () => {
-            matchAudio = !matchAudio
-            if (matchAudio) beatDetect.reset()
-            autoBar.setMatchAudio(matchAudio)
-        },
+        onToggle: toggleAuto,
+        onTempoChange: setTempo,
+        onMode: setAutoMode,
+        onBars: setAutoBars,
+        onMatchAudio: toggleMatchAudio,
     })
     beatClock.start(now())
     autoBar.startTempo() // run the tempo-bar's beat animation alongside the clock
@@ -371,11 +388,18 @@ async function bootInto({ container = null, audioContext = null, destination = n
         const { width, height } = parseResolution(str)
         if (width && height) compositor.resize(width, height)
     }
+    // Each setting, by its key: store it, then apply it.
+    const settingActions = {
+        resolution: (v) => { settings.set('resolution', v); applyResolution(v) },
+        outputFadeTime: (v) => { settings.set('outputFadeTime', v); output.setFadeTime(v) },
+        beatSensitivity: (v) => { settings.set('beatSensitivity', v); beatDetect.setSensitivity(v) },
+        theme: (v) => { settings.set('theme', v); applyTheme(v) },
+    }
     const settingsDrawer = buildSettingsDrawer(app, settings, {
-        onResolution: (v) => { settings.set('resolution', v); applyResolution(v) },
-        onFadeTime: (v) => { settings.set('outputFadeTime', v); output.setFadeTime(v) },
-        onBeatSensitivity: (v) => { settings.set('beatSensitivity', v); beatDetect.setSensitivity(v) },
-        onTheme: (v) => { settings.set('theme', v); applyTheme(v) },
+        onResolution: settingActions.resolution,
+        onFadeTime: settingActions.outputFadeTime,
+        onBeatSensitivity: settingActions.beatSensitivity,
+        onTheme: settingActions.theme,
     })
     // Normalized top-bar cluster (upper-right): settings gear + info. The gear
     // is the drawer's own toggle (keeps its .hd4-settings-gear class + wiring);
@@ -472,7 +496,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         // clean program *beneath* the key; otherwise capture the on-air program.
         const k = compositorState.key
         const source = k.on && k.sourceCh === 5 ? compositor.cleanCanvas : programView.canvas
-        if (!stillStore.capture(source)) return
+        if (!stillStore.capture(source)) return false
         compositor.setStill(stillStore.canvas) // KEY STILL reads this live buffer
         refreshStillAvailable()
         // Refresh any channel already sourced from the still so a re-capture
@@ -488,6 +512,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         stillStore.store(storeEmbeddedStills)
             .then((id) => { if (id) refreshStillSources() })
             .catch((e) => console.warn('[hd4] the still could not be stored', e?.message || e))
+        return true
     }
 
     // --- Recording (program canvas + main/AUX audio → file) ---
@@ -576,9 +601,10 @@ async function bootInto({ container = null, audioContext = null, destination = n
             await memory.saveWithStills(slot, snapshot, storeEmbeddedStills)
         } catch (e) {
             console.error(`[hd4] memory ${slot} was not saved`, e)
-            return
+            return false
         }
         memoryBar.setOccupied(memory.list())
+        return true
     }
     // Saves finish in click order, and a recall waits for a save still being
     // written, as when saves were synchronous.
@@ -588,6 +614,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         const save = (saving || Promise.resolve()).then(() => writeMemory(slot, snapshot))
         saving = save
         save.then(() => { if (saving === save) saving = null })
+        return save
     }
     const recallMemory = (slot) => {
         const recall = () => {
@@ -595,10 +622,9 @@ async function bootInto({ container = null, audioContext = null, destination = n
             refreshAfterRecall()
             // A recalled source that cannot start falls back on its channel
             // afterwards; re-sync the pickers once every source has settled.
-            settled.then(() => multiview.refresh())
+            return settled.then(() => multiview.refresh())
         }
-        if (saving) saving.then(recall)
-        else recall()
+        return saving ? saving.then(recall) : recall()
     }
     const memoryBar = buildMemoryBar(topbar, {
         onSave: (slot) => { saveMemory(slot) },
@@ -624,11 +650,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         record: () => toggleRecording(),
         freeze: () => output.toggleFreeze(),
         fade: () => output.toggleFade(now()),
-        auto: () => {
-            const on = autoMix.toggle()
-            if (on) autoMix.reset(beatClock.beatIndex)
-            autoBar.setEnabled(on)
-        },
+        auto: toggleAuto,
         settings: () => settingsDrawer.toggle(),
     }, document, { isSuspended: overlayOpen })
 
@@ -666,7 +688,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
             case 'fade': output.toggleFade(now()); break
             case 'still': captureStill(); break
             case 'record': toggleRecording(); break
-            case 'auto': { const on = autoMix.toggle(); if (on) autoMix.reset(beatClock.beatIndex); autoBar.setEnabled(on); break }
+            case 'auto': toggleAuto(); break
             default: break
         }
     }
@@ -680,12 +702,13 @@ async function bootInto({ container = null, audioContext = null, destination = n
         count: userButtons.count,
         initial: userButtons.list(),
         onTrigger: (slot) => runUserAction(userButtons.get(slot)),
-        onAssign: (slot, id) => {
-            userButtons.set(slot, id)
-            userBar.setAssignment(slot, userButtons.get(slot))
-            window.localStorage.setItem(USER_KEY, JSON.stringify(userButtons.serialize()))
-        },
+        onAssign: (slot, id) => assignUserButton(slot, id),
     })
+    function assignUserButton(slot, id) {
+        userButtons.set(slot, id)
+        userBar.setAssignment(slot, userButtons.get(slot))
+        window.localStorage.setItem(USER_KEY, JSON.stringify(userButtons.serialize()))
+    }
 
     // --- MIDI control (learn + map) ---
     const MIDI_KEY = 'hd4.midiMap'
@@ -741,6 +764,20 @@ async function bootInto({ container = null, audioContext = null, destination = n
     midiBtn.addEventListener('click', () => midiPanel.open())
     topbar.appendChild(midiBtn)
 
+    // Go online (Seance): the seance-logo opener for the <seance-dialog>
+    // (index.html). It stays hidden until the collaboration controller is
+    // wired, which only the standalone page does (the rack has no dialog).
+    const seanceDialog = container ? null : document.getElementById('seance-dialog')
+    const onlineBtn = document.createElement('button')
+    onlineBtn.type = 'button'
+    onlineBtn.className = 'hd4-online-open hf-icon-btn tooltip'
+    onlineBtn.dataset.title = 'Collaborate online'
+    onlineBtn.setAttribute('aria-label', 'Online collaboration')
+    onlineBtn.innerHTML = SEANCE_LOGO_SVG
+    onlineBtn.hidden = true
+    onlineBtn.addEventListener('click', () => seanceDialog?.show?.())
+    topbar.appendChild(onlineBtn)
+
     // Finally the normalized cluster (settings + info) — appended last so it
     // anchors upper-right; tooltips activate the .tooltip data-title hints.
     topbar.appendChild(topbarCluster)
@@ -782,9 +819,198 @@ async function bootInto({ container = null, audioContext = null, destination = n
     window.addEventListener('pointerdown', unlockAudio)
     window.addEventListener('keydown', unlockAudio)
 
+    // --- Agent controls: the app's own actions, for window.HD4Agent and the
+    //     Seance relay (js/agent/). Each moves the same state and panels as
+    //     the matching control, so an agent's change reads like a person's.
+    //     Channels are numbered 1..4 here. ---
+    const programSource = (dsl) => createSource('shader', { dsl, name: presetByDsl(dsl)?.name || CUSTOM_PROGRAM_NAME })
+    // Apply a source to a channel and say how it went: applied, failed (the
+    // channel fell back to its previous source) or superseded (another change
+    // took the channel meanwhile). A program reports the images it could not bind.
+    const applySource = async (n, source, runtime) => {
+        const channel = state.channels[n - 1]
+        let started
+        try {
+            started = await channel.setSource(source, runtime)
+        } catch (e) {
+            multiview.refresh()
+            return { status: 'failed', message: e?.message || String(e) }
+        }
+        multiview.refresh()
+        if (channel.source !== source) return { status: 'superseded' }
+        return { status: 'applied', missingImages: started?.missingImages || [] }
+    }
+    // A program from the Seance session is checked first, like a pasted one,
+    // so a program that does not compile never stops a running camera or clip.
+    const applyRemoteProgram = async (n, dsl) => {
+        const channel = state.channels[n - 1]
+        if (channel.source?.type === 'shader' && channel.source.dsl === dsl) return { status: 'applied' }
+        let problem
+        try {
+            problem = await state.renderers[n - 1].check(stripMediaUrls(dsl))
+        } catch (e) {
+            problem = e?.message || String(e)
+        }
+        const outcome = problem ? { status: 'failed', message: problem } : await applySource(n, programSource(dsl))
+        if (outcome.status === 'failed') {
+            console.warn(`[seance] channel ${n} program from the session was not applied`, outcome.message)
+            showParam('ONLINE', 'INVALID')
+        }
+        return outcome
+    }
+    // A browser may hold audio until the person interacts with the page;
+    // an agent's command waits for it this long, then reports the state.
+    const settleAudio = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(resolve, 5000))])
+    const controls = {
+        setChannelProgram: (n, dsl) => applySource(n, programSource(dsl)),
+        setChannelLibrary(n, name) {
+            const preset = presetByName(name)
+            return applySource(n, createSource('shader', { dsl: preset.dsl, name: preset.name }))
+        },
+        // Only the still captured in this page: a stored still that a memory
+        // slot names is the person's, so an agent never reaches it.
+        setChannelStill(n) {
+            if (!stillStore.dataUrl) return { status: 'missing' }
+            return applySource(n, createSource('image', { url: stillStore.dataUrl, name: 'Still', stillId: stillStore.stillId }))
+        },
+        async setChannelCamera(n, deviceId) {
+            const outcome = await applySource(n, createSource('camera', { deviceId }))
+            if (outcome.status === 'applied') refreshCameras() // re-enumerate for device labels
+            return outcome
+        },
+        setChannelOptions(n, { fit, autoInclude }) {
+            if (fit) state.renderers[n - 1].setFitMode(fit)
+            if (autoInclude !== undefined) autoMix.setIncluded(n, autoInclude)
+            multiview.refresh()
+        },
+        setPreview(n) { previewBus.set(n); previewView.setPreview(n) },
+        take({ channel, transition }) {
+            if (channel === undefined) takeToProgram(transition === 'cut' ? 'cut' : 'auto')
+            else if (transition === 'cut') switcher.cut(channel)
+            else switcher.take(channel, now())
+        },
+        setTransition({ type, time, curve, blend }) {
+            if (type !== undefined) { setTransitionType(type); transitionBar.setType(type) }
+            if (time !== undefined) { setTransitionTime(time); transitionBar.setTime(time) }
+            if (curve !== undefined) { setCurve(curve); transitionBar.setCurve(curve) }
+            if (blend !== undefined) { setBlend(blend); transitionBar.setBlend(blend) }
+        },
+        setAuto({ on, mode, bars, bpm, matchAudio: match }) {
+            if (on !== undefined && on !== autoMix.enabled) toggleAuto()
+            if (mode !== undefined) { setAutoMode(mode); autoBar.setMode(mode) }
+            if (bars !== undefined) { setAutoBars(bars); autoBar.setBars(bars) }
+            if (bpm !== undefined) { setTempo(bpm); autoBar.setBpm(bpm) }
+            if (match !== undefined && match !== matchAudio) toggleMatchAudio()
+        },
+        setComposition({ mode, pinp, split }) {
+            if (mode !== undefined) compositorState.setComposition(mode)
+            if (pinp) compositorState.setPinp(pinp)
+            if (split) compositorState.setSplit(split)
+            syncComposition()
+        },
+        setKey(partial) {
+            compositorState.setKey(partial)
+            // As the KEY button does: arming with no source keys channel 1.
+            if (compositorState.key.on && !compositorState.key.sourceCh) compositorState.setKey({ sourceCh: 1 })
+            syncComposition()
+        },
+        setOutput({ freeze, fade, vfx }) {
+            if (freeze !== undefined && freeze !== output.freeze) toggleFreeze()
+            if (fade !== undefined && fade !== output.faded) toggleFade()
+            if (vfx !== undefined) { setVfx(vfx); outputBar.setVfx(vfx) }
+        },
+        captureStill: () => captureStill(),
+        async setRecording(on) {
+            if (on === recorder.recording) return
+            await settleAudio(toggleRecording())
+        },
+        openViewport: () => openViewport(),
+        async setAudioChannel(n, { fader, mute, solo, source, strip }) {
+            const i = n - 1
+            if (fader !== undefined) { audio.setFader(i, fader); mixerPanel.setFader(i, fader) }
+            if (mute !== undefined) { audio.setMute(i, mute); mixerPanel.setMuted(i, mute) }
+            if (solo !== undefined) { audio.setSolo(i, solo); mixerPanel.setSoloed(i, solo) }
+            if (source !== undefined) {
+                await audio.setChannelAudioMode(i, source)
+                mixerPanel.setAudioSource(i, source)
+            }
+            if (strip) {
+                audio.setStripParams(i, strip)
+                if (stripEditor.isOpen && stripEditor.channel === i) stripEditor.update(audio.stripParams(i))
+            }
+        },
+        setAudioMain({ fader, monitor, recordSource: src, bus }) {
+            if (fader !== undefined) { audio.setMainFader(fader); mixerPanel.setMainFader(fader) }
+            if (monitor !== undefined) { audio.setMonitor(monitor); mixerPanel.setMonitor(monitor) }
+            if (src !== undefined) { recordSource = src; mixerPanel.setRecordSource(src) }
+            if (bus) {
+                audio.setMainParams(bus)
+                if (mainBusEditor.isOpen) mainBusEditor.update(audio.mainParams())
+            }
+        },
+        async setAudioInput(n, deviceId) {
+            const i = n - 1
+            await settleAudio(audio.setChannelAudioMode(i, 'device', deviceId).then(refreshAudioInputs))
+            mixerPanel.setAudioSource(i, audio.channelAudioMode(i), audio.channelAudioDeviceId(i))
+        },
+        saveMemory: (slot) => saveMemory(slot),
+        recallMemory: (slot) => recallMemory(slot),
+        setSettings(values) {
+            for (const [key, value] of Object.entries(values)) settingActions[key]?.(value)
+            settingsDrawer.refresh()
+        },
+        setUserButton: (button, id) => assignUserButton(button - 1, id),
+        stillCaptured: () => stillStore.hasStill,
+        matchAudio: () => matchAudio,
+        recordSource: () => recordSource,
+    }
+    bootstrapAgent({
+        channels: state.channels,
+        renderers: state.renderers,
+        switcher,
+        preview: previewBus,
+        compositor,
+        composition: compositorState,
+        output,
+        audio,
+        memory,
+        settings,
+        autoMix,
+        beatClock,
+        userButtons,
+        still: stillStore,
+        recorder,
+        programCanvas: programView.canvas,
+        getOnline: () => online,
+        controls,
+    })
+
+    // --- Online collaboration (Seance): the four channels' programs as one
+    //     session; the agent relay rides its socket. ---
+    let online = null
+    if (seanceDialog) {
+        try {
+            online = await createHD4OnlineCollaboration({
+                channels: state.channels,
+                renderers: state.renderers,
+                applyRemoteText: applyRemoteProgram,
+                createSocketClass: ({ uploadImage }) => createSeanceAgentSocket({ appVersion: VERSION, uploadImage }),
+                dialog: seanceDialog,
+                report: showParam,
+                location: window.location,
+                history: window.history,
+                clipboard: navigator.clipboard,
+            })
+            onlineBtn.hidden = false
+        } catch (e) {
+            console.warn('[seance] online collaboration unavailable', e?.message || e)
+        }
+    }
+
     // --- Per-frame loop ---
     const frame = (t) => {
         for (const ch of state.channels) ch.tick()
+        online?.syncChannels()
 
         // Beat matching: optionally re-anchor the clock to the audio, then
         // run the beat clock and let auto-mix take channels on the beat. The
@@ -854,6 +1080,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         programOutput,
         viewport: viewportWindow,
         syncOutput: syncOutputController,
+        get online() { return online },
         get recordSource() { return recordSource },
         userButtons,
         midi: { map: midiMap, simulate: (bytes) => onMidi(bytes) },
@@ -940,6 +1167,16 @@ async function bootInto({ container = null, audioContext = null, destination = n
 
     document.dispatchEvent(new CustomEvent('hd4:ready', { detail: { version: VERSION } }))
 
+    // `?seance=` joins once the mixer runs: the session's programs then
+    // replace the startup ones. A join that fails reports itself and leaves
+    // the mixer as it is.
+    try {
+        await online?.joinFromUrlIfPresent()
+    } catch (e) {
+        console.warn('[seance] join from URL failed', e?.message || e)
+    }
+    markAgentReady()
+
     return surface
 }
 
@@ -954,22 +1191,27 @@ async function applySourceChoice(index, choice) {
     } else if (choice.type === 'video' || choice.type === 'image') {
         await ch.setSource(createSource(choice.type, { name: choice.file.name }), { file: choice.file })
     } else if (choice.type === 'still') {
-        const still = state.still
-        if (still?.dataUrl) {
-            await ch.setSource(createSource('image', {
-                url: still.dataUrl,
-                name: 'Still',
-                stillId: still.stillId,
-            }))
-        } else {
-            // No still captured this session (e.g. right after a reload):
-            // re-apply the stored still the memory slots name, the way a
-            // recall restores one.
-            const id = slotStillIds(state.memory)[0]
-            const blob = id ? await getStill(id) : null
-            if (blob) await ch.setSource(createSource('image', { name: 'Still', stillId: id }))
-        }
+        const source = await stillSource()
+        if (source) await ch.setSource(source)
     }
+}
+
+/** The source that shows the still, or null when there is none. */
+async function stillSource() {
+    const still = state.still
+    if (still?.dataUrl) {
+        return createSource('image', {
+            url: still.dataUrl,
+            name: 'Still',
+            stillId: still.stillId,
+        })
+    }
+    // No still captured this session (e.g. right after a reload):
+    // re-apply the stored still the memory slots name, the way a
+    // recall restores one.
+    const id = slotStillIds(state.memory)[0]
+    const blob = id ? await getStill(id) : null
+    return blob ? createSource('image', { name: 'Still', stillId: id }) : null
 }
 
 function now() {

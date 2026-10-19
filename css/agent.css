@@ -1,0 +1,35 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * The opt-in ?agent=1 command form (js/agent/console.js). Loaded only with
+ * ?agent=1, so the app's normal layout never carries it.
+ */
+#hd4-agent-console {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 1000;
+    width: min(440px, calc(100vw - 24px));
+    max-height: calc(100dvh - 70px);
+    overflow: auto;
+    padding: 12px;
+    box-sizing: border-box;
+    color: var(--hf-text-normal, #eee);
+    background: var(--hf-bg-elevated, #191923);
+    border: 1px solid var(--hf-border, #666);
+    font: 13px/1.45 var(--hf-font-family, system-ui), sans-serif;
+}
+#hd4-agent-console summary { cursor: pointer; font-weight: 600; }
+#hd4-agent-console label { display: grid; gap: 4px; margin-block: 10px; }
+#hd4-agent-console :is(select, textarea, button) {
+    color: inherit;
+    background: var(--hf-bg-surface, #272733);
+    border: 1px solid var(--hf-border, #777);
+    padding: 7px;
+    font: inherit;
+}
+#hd4-agent-console textarea { resize: vertical; font-family: monospace; }
+#hd4-agent-console button:disabled { opacity: .5; }
+#hd4-agent-console pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+#hd4-agent-console img { max-width: 100%; }
+#hd4-agent-console a { color: var(--hf-accent, #c5b6ff); }
+#hd4-agent-console [hidden] { display: none; }
