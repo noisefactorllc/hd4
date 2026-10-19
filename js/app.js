@@ -19,6 +19,9 @@
 // global Escape handler for the handfish escape stack the overlay panels
 // register with (once at boot; double-registration corrupts close ordering).
 import { AboutDialog, initializeTooltips, initEscapeHandler } from 'handfish'
+// A namespace import: a handfish without the connect-agent dialog still loads
+// the app, and the pickers then offer no "Connect agent…".
+import * as handfish from 'handfish'
 import { logoSvg } from './ui/logo.js'
 import { Channel } from './channel.js'
 import { ChannelRenderer } from './channelRenderer.js'
@@ -419,13 +422,19 @@ async function bootInto({ container = null, audioContext = null, destination = n
 
     // --- Multiview (source monitors) ---
     // Online collaboration (Seance) opens from "Go online…" at the end of the
-    // pickers' Program group, beside Paste program; only the standalone page
-    // has the <seance-dialog> (index.html), so the rack never offers it.
+    // pickers' Program group, beside Paste program, and "Connect agent…" right
+    // under it opens the shared connect-agent dialog. Only the standalone page
+    // has the dialogs (index.html), so the rack never offers them.
     const seanceDialog = container ? null : document.getElementById('seance-dialog')
+    const agentDialog = seanceDialog && customElements.get('agent-connect-dialog') && handfish.agentConnectPrompt
+        ? document.getElementById('agent-connect-dialog') : null
+    let online = null // the collaboration controller, wired once the mixer is built (below)
     const multiview = buildMultiview(byId('hd4-sources'), state.channels, {
         canGoOnline: Boolean(seanceDialog),
+        canConnectAgent: Boolean(agentDialog),
         onSelectSource: (index, choice) => {
             if (choice.type === 'online') { seanceDialog?.show?.(); multiview.refresh(); return undefined }
+            if (choice.type === 'agent') { online?.openAgentDialog(); multiview.refresh(); return undefined }
             if (choice.type === 'paste') return programPaste.pasteFromClipboard(index)
             // The rejection handler covers only the application itself (the
             // channel has already fallen back to its previous source via
@@ -982,15 +991,20 @@ async function bootInto({ container = null, audioContext = null, destination = n
 
     // --- Online collaboration (Seance): the four channels' programs as one
     //     session; the agent relay rides its socket. ---
-    let online = null
     if (seanceDialog) {
         try {
             online = await createHD4OnlineCollaboration({
                 channels: state.channels,
                 renderers: state.renderers,
                 applyRemoteText: applyRemoteProgram,
-                createAgentRelay: ({ uploadImage }) => createSeanceAgentRelay({ appVersion: VERSION, uploadImage }),
+                createAgentRelay: ({ uploadImage, onAgent }) => createSeanceAgentRelay({ appVersion: VERSION, uploadImage, onAgent }),
                 dialog: seanceDialog,
+                agentDialog,
+                agentPrompt: (sessionUrl) => handfish.agentConnectPrompt({
+                    app: 'HD4',
+                    contractUrl: 'https://hd4.noisefactor.io/llms-full.txt',
+                    sessionUrl,
+                }),
                 location: window.location,
                 history: window.history,
                 clipboard: navigator.clipboard,

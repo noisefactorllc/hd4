@@ -19,6 +19,12 @@
  * WebSocket class of the relay the app passes in. Only a session this tab took
  * online is marked for the relay to answer in. Status reaches the person
  * through the <seance-dialog>; the console says why a join failed.
+ *
+ * The shared <agent-connect-dialog> walks the person through connecting an
+ * agent: its Go Online step takes the channels online as the go-online dialog
+ * does, it copies a prompt that names the agent contract and the session link,
+ * and it confirms once the agent's first request reaches this tab (the relay's
+ * onAgent).
  */
 
 import { forgetImages, setImageResolver } from './programImages.js'
@@ -93,6 +99,8 @@ class HD4OnlineController {
         applyRemoteText,
         createAgentRelay = null,
         dialog,
+        agentDialog = null,
+        agentPrompt = null,
         location = globalThis.location,
         history = globalThis.history,
         clipboard = globalThis.navigator?.clipboard,
@@ -112,6 +120,8 @@ class HD4OnlineController {
         this.createAgentRelay = createAgentRelay
         this.agentRelay = null
         this.dialog = dialog
+        this.agentDialog = agentDialog
+        this.agentPrompt = agentPrompt
         this.location = location
         this.history = history
         this.clipboard = clipboard
@@ -232,8 +242,15 @@ class HD4OnlineController {
         await this.joinSession(sessionId, { writeUrl: false })
     }
 
+    /** Open the connect-agent dialog at the step the session is at. */
+    openAgentDialog() {
+        this.syncStatusUi()
+        this.agentDialog?.show?.()
+    }
+
     goOffline() {
         this._actionVersion++
+        if (this.agentDialog) this.agentDialog.connected = false
         this._closeActiveSession()
         this._writeSessionToUrl(null)
         this.syncStatusUi()
@@ -264,6 +281,10 @@ class HD4OnlineController {
         this.dialog.state = onlineStatus ? status : (status === 'connecting' ? 'connecting' : 'offline')
         this.dialog.sessionId = onlineStatus ? sessionId : ''
         this.dialog.sessionUrl = shareUrl
+        if (this.agentDialog) {
+            this.agentDialog.state = this.dialog.state
+            this.agentDialog.prompt = shareUrl && this.agentPrompt ? this.agentPrompt(shareUrl) : ''
+        }
     }
 
     /** Say why something did not work; the dialog shows the state itself. */
@@ -278,7 +299,12 @@ class HD4OnlineController {
         this._onlinePromise = import(this.sdkUrl)
             .then((sdk) => {
                 // The agent relay rides the SDK's own socket (agent/relay.js).
-                this.agentRelay = this.createAgentRelay?.({ uploadImage: (blob) => this.online.uploadImage(blob) }) || null
+                this.agentRelay = this.createAgentRelay?.({
+                    uploadImage: (blob) => this.online.uploadImage(blob),
+                    onAgent: () => {
+                        if (this.agentDialog) this.agentDialog.connected = true
+                    },
+                }) || null
                 this.online = sdk.createOnlineDslLayer({
                     seanceUrl: this.seanceUrl,
                     dialect: SESSION_DIALECT,
@@ -354,6 +380,12 @@ class HD4OnlineController {
     }
 
     _wireUi() {
+        // The connect-agent dialog's Go Online step takes the channels online
+        // as the go-online dialog does. HD4 shows no message of its own: the
+        // dialog shows each step, and the console says what went wrong.
+        this.agentDialog?.addEventListener('go-online', () => this.takeOnline())
+        this.agentDialog?.addEventListener('copy-failed', () => this._announce('the agent prompt was not copied'))
+
         // All collaboration intents arrive from the single seance-dialog as
         // semantic events.
         const dialog = this.dialog

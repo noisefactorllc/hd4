@@ -7,18 +7,21 @@
  * pattern/fill library. The picker reports the user's choice via
  * onSelectSource; the app applies it. With canGoOnline, the Program group
  * ends with Go online…, which opens online collaboration (Seance) for the
- * channel programs; like Paste program it is an action, not a source.
+ * channel programs, and with canConnectAgent, Connect agent… right under it;
+ * like Paste program they are actions, not sources.
  */
 import { SOURCE_LIBRARY, presetByDsl } from '../sources/presets.js'
 import { isStillId, sourceKind } from '../sources/sourceModel.js'
 
 export function buildMultiview(container, channels, {
     onSelectSource, onSetFit, getFit, onSetAutoInclude, getAutoInclude, cameras = [], canGoOnline = false,
+    canConnectAgent = false,
 } = {}) {
     container.innerHTML = ''
     const tiles = channels.map((ch, i) => buildTile(ch, i, {
         onSelectSource,
         canGoOnline,
+        canConnectAgent,
         onSetFit,
         initialFit: getFit ? getFit(i) : 'cover',
         onSetAutoInclude,
@@ -49,7 +52,7 @@ export function buildMultiview(container, channels, {
     }
 }
 
-function buildTile(channel, index, { onSelectSource, canGoOnline, onSetFit, initialFit, onSetAutoInclude, initialInclude }) {
+function buildTile(channel, index, { onSelectSource, canGoOnline, canConnectAgent, onSetFit, initialFit, onSetAutoInclude, initialInclude }) {
     const el = document.createElement('div')
     el.className = 'hd4-monitor'
     el.dataset.channel = String(channel.id)
@@ -73,7 +76,7 @@ function buildTile(channel, index, { onSelectSource, canGoOnline, onSetFit, init
 
     const auto = buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude)
     const fit = buildFitToggle(index, onSetFit, initialFit)
-    const picker = buildSourcePicker(index, onSelectSource, { canGoOnline })
+    const picker = buildSourcePicker(index, onSelectSource, { canGoOnline, canConnectAgent })
     picker.sync(channel.source)
 
     bar.append(num, label, auto.el, fit.el, picker.control)
@@ -92,7 +95,7 @@ function buildTile(channel, index, { onSelectSource, canGoOnline, onSetFit, init
 }
 
 /** Categorized source picker: cameras (per device) / files / capture / program / library. */
-function buildSourcePicker(index, onSelectSource, { canGoOnline = false } = {}) {
+function buildSourcePicker(index, onSelectSource, { canGoOnline = false, canConnectAgent = false } = {}) {
     const select = document.createElement('select')
     select.className = 'hd4-source-select'
     select.setAttribute('aria-label', `Channel ${index + 1} source`)
@@ -121,13 +124,20 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false } = {}) 
     pasteOption.value = 'paste'
     pasteOption.textContent = 'Paste program'
     programGroup.appendChild(pasteOption)
-    // Go online… stays last in the group: Custom is inserted before it.
+    // Go online… (and Connect agent… under it) stay last in the group:
+    // Custom is inserted before them.
     let onlineOption = null
     if (canGoOnline) {
         onlineOption = document.createElement('option')
         onlineOption.value = 'online'
         onlineOption.textContent = 'Go online…'
         programGroup.appendChild(onlineOption)
+        if (canConnectAgent) {
+            const agentOption = document.createElement('option')
+            agentOption.value = 'agent'
+            agentOption.textContent = 'Connect agent…'
+            programGroup.appendChild(agentOption)
+        }
     }
 
     select.append(camGroup, fileGroup, captureGroup, programGroup)
@@ -170,6 +180,8 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false } = {}) 
             onSelectSource?.(index, { type: 'paste' })
         } else if (v === 'online') {
             onSelectSource?.(index, { type: 'online' })
+        } else if (v === 'agent') {
+            onSelectSource?.(index, { type: 'agent' })
         } else if (v.startsWith('shader:')) {
             onSelectSource?.(index, { type: 'shader', name: v.slice(7) })
         }

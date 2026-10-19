@@ -46,6 +46,8 @@ test('the relay keeps the shared wire protocol', async () => {
     assert.match(source, /\} else if \(frame\.to !== tabId\) \{\n\s+return\n/)
     assert.match(source, /return \{ WebSocket: RelaySocket, tabId, sessionCreated \}/)
     assert.match(source, /'IMAGE_AS_TEXT'/)
+    assert.match(source, /'OUTSIDE_LINK'/)
+    assert.match(source, /onAgent\?\.\(\{ userId: frame\.user_id/)
     assert.match(source, /^import \{ API_VERSION, makeFailure, makeSuccess \} from '\.\/dispatcher\.js'$/m)
 })
 

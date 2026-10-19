@@ -32,11 +32,14 @@ async function goOnlineFrom(page, channel) {
     await expect(page.locator(picker(channel))).toHaveValue(before)
 }
 
-test('Go online… is the last item of every picker\'s Program group, and nothing else changed on screen', async ({ page }) => {
+test('Go online… ends every picker\'s Program group, and nothing else changed on screen', async ({ page }) => {
     await open(page)
+    // Connect agent… follows it when the loaded handfish has the connect-agent dialog.
+    const tail = await page.evaluate(() => customElements.get('agent-connect-dialog') ? ['Go online…', 'Connect agent…'] : ['Go online…'])
     for (let n = 1; n <= 4; n++) {
         const program = await page.locator(`${picker(n)} optgroup[label="Program"] option`).allTextContents()
-        expect(program.at(-1)).toBe('Go online…')
+        expect(program.slice(-tail.length)).toEqual(tail)
+        expect(program[0]).toBe('Paste program')
     }
     // No other control was added: the top bar keeps its settings + info cluster.
     await expect(page.locator('.hf-topbar-cluster .hf-icon-btn')).toHaveCount(2)

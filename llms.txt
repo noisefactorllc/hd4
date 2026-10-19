@@ -26,9 +26,12 @@ https://visualize.noisedeck.app/llms.txt
 Use this route when you can run shell commands. It works with the HD4 the
 person already has open: their channels, their monitors, their mix.
 
-1. Ask the person to open https://hd4.noisefactor.io, choose **Go online…**
-   at the end of the Program group in any channel's source picker, click
-   **Take Online**, and send you the session link or the six-character code.
+1. Ask the person to open https://hd4.noisefactor.io, choose **Connect
+   agent…** at the end of the Program group in any channel's source picker,
+   click **Go Online**, then **Copy Prompt**, and paste the prompt to you. The
+   prompt names this file and the session link. (Without that dialog: **Go
+   online…** in the same place, **Take Online**, then send the link or the
+   six-character code.)
 2. Get the agent tool. It needs Node 22.4 or later and nothing else:
    `curl -fsSLO https://noisedeck.app/agent/seance-agent.mjs`
 3. Join: `node seance-agent.mjs join <link-or-code>`. It prints the session
@@ -207,7 +210,8 @@ DSL rules that agents most often get wrong:
 - An image is `media(url: "image:<sha256>")`, the SHA-256 of the image's
   bytes. HD4 takes the image from the Seance session the tab is in (add one
   with the agent tool's `image-put`), as bytes; an image never travels as
-  text (`IMAGE_AS_TEXT`). Offline, or when the session lacks the image, the
+  text (`IMAGE_AS_TEXT`), and a session program cannot name media by an
+  outside link (`OUTSIDE_LINK`). Offline, or when the session lacks the image, the
   program still runs, its media step stays empty, and the envelope carries an
   `IMAGE_UNAVAILABLE` warning.
 
@@ -341,6 +345,7 @@ A syntax error has code `SYNTAX`. Diagnostics with severity `warning` do not sto
 | `REMOTE_UNAVAILABLE` | through a session: the command needs the person at the browser, reads or changes what this browser keeps, or would show a camera, a video, an image file or a still |
 | `IMAGE_LIMIT` | the tab already took 16 images in ten minutes. `details.retryAfter` is in seconds |
 | `IMAGE_AS_TEXT` | a session request or answer would carry an image as base64 text. Add the image with `image-put` and use `image:<sha256>` |
+| `OUTSIDE_LINK` | a session request names media by an outside link. Add the image with `image-put` and use `image:<sha256>` |
 | `IMAGE_UPLOAD_FAILED` | the tab could not add an image to the session (the session holds up to 32 images) |
 | `INTERNAL_ERROR` | unexpected failure |
 

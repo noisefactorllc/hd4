@@ -58,18 +58,20 @@ function unavailable(command) {
 
 /**
  * The Seance relay for this tab (see relay.js): its WebSocket class goes to the
- * Seance SDK, and sessionCreated marks a session this tab took online. Commands
- * run with `remote: true`, so they show only what the session may see.
+ * Seance SDK, sessionCreated marks a session this tab took online, and onAgent
+ * hears the first request from each agent. Commands run with `remote: true`,
+ * so they show only what the session may see.
  *
- * @param {{appVersion: string, uploadImage: (blob: Blob) => Promise<string>}} options
+ * @param {{appVersion: string, uploadImage: (blob: Blob) => Promise<string>, onAgent?: Function}} options
  * @returns {{ WebSocket: typeof WebSocket, sessionCreated: (sessionId: string) => void }}
  */
-export function createSeanceAgentRelay({ appVersion, uploadImage }) {
+export function createSeanceAgentRelay({ appVersion, uploadImage, onAgent }) {
     return createAgentRelay({
         app: 'hd4',
         appVersion,
         catalog,
         uploadImage,
+        onAgent,
         async invoke(command, args) {
             if (!REMOTE.has(command)) return { envelope: unavailable(command) }
             await HD4Agent.ready

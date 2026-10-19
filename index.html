@@ -73,9 +73,11 @@
 
     <!-- Online collaboration (Seance), opened from Go online… at the end of
          a channel picker's Program group. handfish's <seance-dialog> owns its
-         own markup and emits take-online / join-session / go-offline / copy-url. -->
+         own markup and emits take-online / join-session / go-offline / copy-url.
+         Connect agent… opens the shared <agent-connect-dialog> beside it. -->
     <seance-dialog id="seance-dialog" heading="Go Online"
         copy="Share the channel programs live. Taking them online creates a session anyone with the link can join. Cameras, video and image files stay on this computer."></seance-dialog>
+    <agent-connect-dialog id="agent-connect-dialog"></agent-connect-dialog>
 
     <script type="module" src="js/app.js"></script>
 </body>

@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { deflateSync } from 'node:zlib'
 import { test, expect } from './fixtures.js'
-import { routeSeance, startSeanceServer } from './seanceLocal.js'
+import { PAGE_ORIGIN, routeHandfishDist, routeSeance, startSeanceServer } from './seanceLocal.js'
 import { joinSession } from './seanceRelay.js'
 
 const MAGENTA = 'search synth\nsolid(color: #ff00ff).write(o0)\nrender(o0)'
@@ -135,6 +135,9 @@ test('an agent in the session drives the owner\'s tab and sees its monitors as i
         const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
         const asText = await agent.call('setProgram', { dsl: `search synth\nmedia(url: "${pixel}").write(o0)\nrender(o0)`, channel: 3 })
         expect(asText.envelope.error.code).toBe('IMAGE_AS_TEXT')
+        // Nor may a session program make the person's browser fetch an outside link.
+        const linked = await agent.call('setProgram', { dsl: 'search synth\nmedia(url: "https://example.com/a.png").write(o0)\nrender(o0)', channel: 3 })
+        expect(linked.envelope.error.code).toBe('OUTSIDE_LINK')
 
         // A program that does not compile is refused and changes nothing.
         const refused = await agent.call('setProgram', { dsl: 'search synth\nsolid(colour: #ff0000).write(o0)\nrender(o0)', channel: 3 })
@@ -275,5 +278,61 @@ test('a tab that inherits the session does not answer, and the person\'s tab ans
     } finally {
         agent.close()
         await visitor.close()
+    }
+})
+
+test('connect agent walks the person through going online, copying the prompt and the agent joining', async ({ page, context }) => {
+    test.setTimeout(180_000)
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: PAGE_ORIGIN })
+    await routeHandfishDist(page)
+    await routeSeance(page, server)
+    await page.goto('/')
+    await page.waitForFunction(() => window.__hd4?.ready === true && window.HD4Agent, null, { timeout: 30_000 })
+    expect(await page.evaluate(() => Boolean(customElements.get('agent-connect-dialog'))),
+        'Set HANDFISH_DIST to a handfish build that has <agent-connect-dialog>.').toBe(true)
+
+    // Connect agent… sits right under Go online…, and the picker keeps its source.
+    const picker = '.hd4-monitor[data-channel="2"] .hd4-source-select'
+    const program = await page.locator(`${picker} optgroup[label="Program"] option`).allTextContents()
+    expect(program.slice(-2)).toEqual(['Go online…', 'Connect agent…'])
+    await page.selectOption(picker, 'agent')
+    await expect(page.locator(picker)).toHaveValue('image')
+    const dialog = page.locator('#agent-connect-dialog dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('.hf-agent-lead')).toHaveText('To connect an agent, follow these steps:')
+    const states = () => dialog.locator('.hf-agent-step').evaluateAll((items) => items.map((item) => item.dataset.state))
+    expect(await states()).toEqual(['active', 'pending', 'pending'])
+
+    await dialog.locator('[data-action="go-online"]').click()
+    await expect.poll(states, { timeout: 30_000 }).toEqual(['done', 'active', 'pending'])
+    const code = new URL(page.url()).searchParams.get('seance')
+    expect(code).toBeTruthy()
+
+    await dialog.locator('[data-action="copy-prompt"]').click()
+    await expect.poll(states).toEqual(['done', 'done', 'active'])
+    const prompt = (await page.evaluate(() => navigator.clipboard.readText())).trim().split('\n')
+    expect(prompt.slice(0, 4)).toEqual([
+        'Connect to my HD4 session and help me with it.',
+        'Read https://hd4.noisefactor.io/llms-full.txt first.',
+        'Then run:',
+        '  curl -fsSLO https://noisedeck.app/agent/seance-agent.mjs',
+    ])
+    expect(prompt[4]).toMatch(/^ {2}node seance-agent\.mjs join /)
+    // The agent follows the prompt's last line: the session link.
+    const link = new URL(prompt[4].trim().split(' ').at(-1).replace(/['"]/g, ''))
+    expect(`${link.origin}${link.pathname}`).toBe(`${PAGE_ORIGIN}/`)
+    expect(link.searchParams.get('seance')).toBe(code)
+
+    const agent = await joinSession(server, link.searchParams.get('seance'))
+    try {
+        expect((await agent.describe()).envelope.result.app).toBe('hd4')
+        await expect.poll(states).toEqual(['done', 'done', 'done'])
+        await expect(dialog).toBeHidden({ timeout: 10_000 })
+        // Opened again while online, the dialog starts at the prompt.
+        await page.selectOption(picker, 'agent')
+        await expect(dialog).toBeVisible()
+        await expect.poll(states).toEqual(['done', 'active', 'pending'])
+    } finally {
+        agent.close()
     }
 })

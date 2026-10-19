@@ -10,6 +10,9 @@
  *
  * The page imports the SDK from its production URL; the route serves the
  * local bundle in its place, and __HD4_SEANCE_CONFIG__ names the local server.
+ *
+ * HANDFISH_DIST (a handfish dist directory) serves an unreleased handfish
+ * bundle in place of the CDN one, for a dialog that is not released yet.
  */
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -33,6 +36,14 @@ export async function routeSeance(page, server) {
         if (!file.startsWith(`${dist}${sep}`) || !existsSync(file)) return route.fulfill({ status: 404 })
         return route.fulfill({ path: file, contentType: 'text/javascript', headers: { 'Access-Control-Allow-Origin': '*' } })
     })
+}
+
+/** Serve the handfish bundle from HANDFISH_DIST, when it is set. */
+export async function routeHandfishDist(page) {
+    const handfish = process.env.HANDFISH_DIST && resolve(process.env.HANDFISH_DIST)
+    if (!handfish) return
+    await page.route('https://handfish.noisefactor.io/0/handfish.esm.min.js', (route) =>
+        route.fulfill({ path: join(handfish, 'handfish.esm.min.js'), contentType: 'text/javascript', headers: { 'Access-Control-Allow-Origin': '*' } }))
 }
 
 function freePort() {
