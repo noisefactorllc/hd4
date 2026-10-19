@@ -25,6 +25,10 @@ Playwright integration suite).
 **Switching & program**
 - **4 channels**: each accepts a camera, video file, image, or pattern/fill from the source library.
   For cameras, select the **device**. Use **per-channel fit** to select scale or zoom/crop.
+- **Paste a program**: a Noisemaker DSL program on the clipboard (for example, from
+  Noisedeck's *copy program*) becomes a channel's shader. **⌘/Ctrl+V** loads it into the
+  PVW channel; **Paste program** in a channel's picker loads it into that channel. A pasted
+  program shows as **Custom** and is saved with memory slots.
 - **Multiview** of all four sources, a **program monitor**, and a **preview (PVW)**
   monitor with **TAKE / AUTO**.
 - **VIDEO INPUT SELECT [1–4]** takes through **CUT / MIX / WIPE** + transition **TIME**,
@@ -66,6 +70,7 @@ Playwright integration suite).
 | `w` | WIPE | `f` | FREEZE |
 | `a` | AUTO (beat-synced) | `b` | FADE to black |
 | `s` | Settings | `r` | REC (record) |
+| `⌘`/`Ctrl`+`V` | Paste a program into PVW | | |
 
 ## Develop
 

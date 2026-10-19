@@ -3,8 +3,9 @@
  * Multiview — the four source monitors ([INPUT] view). Each tile
  * shows a channel's live canvas, its number + label, a fit toggle (for
  * media sources), and a categorized source picker: live cameras (one per
- * device), video/image files, and the pattern/fill library. The picker
- * reports the user's choice via onSelectSource; the app applies it.
+ * device), video/image files, a program pasted from the clipboard, and the
+ * pattern/fill library. The picker reports the user's choice via
+ * onSelectSource; the app applies it.
  */
 import { SOURCE_LIBRARY, presetByDsl } from '../sources/presets.js'
 import { isStillId, sourceKind } from '../sources/sourceModel.js'
@@ -68,7 +69,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
     const auto = buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude)
     const fit = buildFitToggle(index, onSetFit, initialFit)
     const picker = buildSourcePicker(index, onSelectSource)
-    setSelectValue(picker.select, channel.source)
+    picker.sync(channel.source)
 
     bar.append(num, label, auto.el, fit.el, picker.control)
     el.append(screen, bar)
@@ -76,7 +77,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
     return {
         el,
         setLabel(text) { label.textContent = text; label.title = text },
-        syncSelect(source) { setSelectValue(picker.select, source) },
+        syncSelect(source) { picker.sync(source) },
         setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
         updateFit(mode) { fit.update(mode) },
         updateCameras(list) { picker.updateCameras(list) },
@@ -84,7 +85,7 @@ function buildTile(channel, index, { onSelectSource, onSetFit, initialFit, onSet
     }
 }
 
-/** Categorized source picker: cameras (per device) / files / library. */
+/** Categorized source picker: cameras (per device) / files / capture / program / library. */
 function buildSourcePicker(index, onSelectSource) {
     const select = document.createElement('select')
     select.className = 'hd4-source-select'
@@ -106,7 +107,16 @@ function buildSourcePicker(index, onSelectSource) {
     const captureGroup = document.createElement('optgroup')
     captureGroup.label = 'Capture'
 
-    select.append(camGroup, fileGroup, captureGroup)
+    // Paste program reads the clipboard; Custom is listed only while the
+    // channel shows a pasted program, which is no library entry.
+    const programGroup = document.createElement('optgroup')
+    programGroup.label = 'Program'
+    const pasteOption = document.createElement('option')
+    pasteOption.value = 'paste'
+    pasteOption.textContent = 'Paste program'
+    programGroup.appendChild(pasteOption)
+
+    select.append(camGroup, fileGroup, captureGroup, programGroup)
     for (const cat of SOURCE_LIBRARY) {
         const g = document.createElement('optgroup')
         g.label = cat.category
@@ -142,6 +152,8 @@ function buildSourcePicker(index, onSelectSource) {
             fileInput.click()
         } else if (v === 'still') {
             onSelectSource?.(index, { type: 'still' })
+        } else if (v === 'paste') {
+            onSelectSource?.(index, { type: 'paste' })
         } else if (v.startsWith('shader:')) {
             onSelectSource?.(index, { type: 'shader', name: v.slice(7) })
         }
@@ -178,16 +190,40 @@ function buildSourcePicker(index, onSelectSource) {
         if ([...select.options].some((o) => o.value === prev)) select.value = prev
     }
 
+    function setCustomAvailable(on) {
+        const custom = [...programGroup.children].find((o) => o.value === 'custom')
+        if (on && !custom) {
+            const o = document.createElement('option')
+            o.value = 'custom'
+            o.textContent = 'Custom'
+            programGroup.appendChild(o)
+        } else if (!on && custom) {
+            custom.remove()
+        }
+    }
+
+    /** Reflect the channel's source, listing Custom first when it needs it. */
+    function sync(source) {
+        setCustomAvailable(isCustomProgram(source))
+        setSelectValue(select, source)
+    }
+
     const control = document.createElement('span')
     control.className = 'hd4-source-control'
     control.append(select, fileInput)
-    return { control, select, updateCameras, setStillAvailable }
+    return { control, select, sync, updateCameras, setStillAvailable }
+}
+
+/** A shader source that is no library entry: a pasted program. */
+export function isCustomProgram(source) {
+    return source?.type === 'shader' && !presetByDsl(source.dsl)
 }
 
 /**
  * Reflect the channel's actual source in the picker where we can. An image
  * the channel shows as a captured still (it names one by id) selects the
  * Still capture option; an image loaded from a file selects Image file….
+ * A pasted program selects Custom.
  * Exported for the unit suite: the selection mapping is pure.
  */
 export function setSelectValue(select, source) {
@@ -195,6 +231,7 @@ export function setSelectValue(select, source) {
     if (source?.type === 'shader') {
         const preset = presetByDsl(source.dsl)
         if (preset && has(`shader:${preset.name}`)) select.value = `shader:${preset.name}`
+        else if (!preset && has('custom')) select.value = 'custom'
     } else if (source?.type === 'camera') {
         const byDevice = `camera:${source.deviceId}`
         select.value = (source.deviceId && has(byDevice)) ? byDevice : 'camera'

@@ -41,6 +41,7 @@ import { Recorder, recordingFilename } from './recorder.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
+import { attachProgramPaste, pastedSource } from './programPaste.js'
 import { BeatClock } from './beatClock.js'
 import { AutoMix } from './autoMix.js'
 import { pickLoudest } from './audio/autoAudio.js'
@@ -61,7 +62,7 @@ import { MidiMap, parseMidiMessage } from './midi.js'
 import { buildMidiPanel } from './ui/midiPanel.js'
 import { buildMainBusEditor } from './ui/mainBusEditor.js'
 import { buildSyncOutputPanel } from './ui/syncOutputPanel.js'
-import { SinkManager } from './noisemaker/bundle.js'
+import { SinkManager, compile } from './noisemaker/bundle.js'
 import { ProgramOutput } from './programOutput.js'
 import { ProgramExportQueue } from './programExportQueue.js'
 import { ViewportWindow } from './viewportWindow.js'
@@ -414,6 +415,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // --- Multiview (source monitors) ---
     const multiview = buildMultiview(byId('hd4-sources'), state.channels, {
         onSelectSource: (index, choice) => {
+            if (choice.type === 'paste') return pasteFromClipboard(index)
             // The rejection handler covers only the application itself (the
             // channel has already fallen back to its previous source via
             // Channel.setSource): warn and re-sync the picker, which still
@@ -598,6 +600,14 @@ async function bootInto({ container = null, audioContext = null, destination = n
     })
     memoryBar.setOccupied(memory.list())
 
+    // Global single-key shortcuts and Cmd/Ctrl+V program paste are suspended
+    // while any overlay panel (settings drawer, channel-strip / main-bus
+    // editor, MIDI panel, Sync output dialog) is open, so keys pressed inside
+    // it only reach that panel's controls.
+    const overlayOpen = () =>
+        settingsDrawer.isOpen || stripEditor.isOpen ||
+        mainBusEditor.isOpen || midiPanel.isOpen || syncPanel.isOpen
+
     // --- Keyboard shortcuts ---
     attachKeyboard({
         take: (a) => switcher.take(a.channel, now()),
@@ -614,15 +624,48 @@ async function bootInto({ container = null, audioContext = null, destination = n
             autoBar.setEnabled(on)
         },
         settings: () => settingsDrawer.toggle(),
-    }, document, {
-        // Global single-key shortcuts are suspended while any overlay panel
-        // (settings drawer, channel-strip / main-bus editor, MIDI panel, Sync
-        // output dialog) is open, so keys pressed inside it only reach that
-        // panel's controls.
-        isSuspended: () =>
-            settingsDrawer.isOpen || stripEditor.isOpen ||
-            mainBusEditor.isOpen || midiPanel.isOpen || syncPanel.isOpen,
-    })
+    }, document, { isSuspended: overlayOpen })
+
+    // --- Program paste ---
+    // A Noisemaker DSL program on the clipboard becomes a channel's shader:
+    // Cmd/Ctrl+V loads it into the PVW channel, to check on preview before
+    // TAKE; a picker's Paste program loads it into that channel. Text that is
+    // not a program, or a program that fails to compile, leaves the channel
+    // on what it was showing.
+    async function pasteProgram(index, text) {
+        const pasted = pastedSource(text, compile)
+        if (pasted.error) {
+            if (pasted.message) console.warn('[hd4] the clipboard holds no program:', pasted.message)
+            showParam('PASTE', pasted.error === 'empty' ? 'EMPTY' : 'INVALID')
+            multiview.refresh()
+            return
+        }
+        try {
+            await state.channels[index].setSource(pasted.source)
+            showParam('PASTE', `CH ${index + 1}`)
+        } catch (e) {
+            console.warn(`[hd4] channel ${index + 1} pasted program was not applied`, e?.message || e)
+            showParam('PASTE', 'INVALID')
+        }
+        multiview.refresh()
+    }
+    async function pasteFromClipboard(index) {
+        let text
+        try {
+            text = await navigator.clipboard.readText()
+        } catch (e) {
+            console.warn('[hd4] the clipboard was not read', e?.message || e)
+            showParam('PASTE', 'DENIED')
+            multiview.refresh()
+            return
+        }
+        await pasteProgram(index, text)
+    }
+    const detachProgramPaste = attachProgramPaste(
+        (text) => { pasteProgram(previewBus.preview - 1, text) },
+        document,
+        { isSuspended: overlayOpen },
+    )
 
     // --- USER assignable macro buttons ---
     const runUserAction = (id) => {
@@ -897,6 +940,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         stop() {
             if (_rafId != null) { cancelAnimationFrame(_rafId); _rafId = null }
             window.removeEventListener('pagehide', onPageHide)
+            detachProgramPaste()
             try { disposeOutputs() } catch (e) { console.warn('[hd4] output teardown', e?.message || e) }
             beatClock.stop()
             try { audio.dispose() } catch { /* ignore */ }

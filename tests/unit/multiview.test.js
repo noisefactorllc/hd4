@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { setSelectValue } from '../../js/ui/multiview.js'
+import { isCustomProgram, setSelectValue } from '../../js/ui/multiview.js'
 import { createSource } from '../../js/sources/sourceModel.js'
 
 const STILL_ID = 'c'.repeat(64)
@@ -61,4 +61,32 @@ test('a shader source selects its library entry by name', () => {
     const select = fakeSelect(PICKER)
     setSelectValue(select, createSource('shader', { dsl: 'search synth\ntestPattern(pattern: colorBars).write(o0)\nrender(o0)', name: 'Color Bars' }))
     assert.equal(select.value, 'shader:Color Bars')
+})
+
+const MAGENTA = 'search synth\nsolid(color: #ff00ff).write(o0)\nrender(o0)'
+
+test('a pasted program (no library entry) selects Custom while the picker lists it', () => {
+    const select = fakeSelect([...PICKER, 'paste', 'custom'])
+    setSelectValue(select, createSource('shader', { dsl: MAGENTA, name: 'Custom' }))
+    assert.equal(select.value, 'custom')
+})
+
+test('a pasted program leaves the selection alone when the picker lists no Custom', () => {
+    const select = fakeSelect([...PICKER, 'paste'])
+    select.value = 'shader:Color Bars'
+    setSelectValue(select, createSource('shader', { dsl: MAGENTA, name: 'Custom' }))
+    assert.equal(select.value, 'shader:Color Bars')
+})
+
+test('a library program selects its entry, not Custom, even while Custom is listed', () => {
+    const select = fakeSelect([...PICKER, 'paste', 'custom'])
+    setSelectValue(select, createSource('shader', { dsl: 'search synth\ntestPattern(pattern: colorBars).write(o0)\nrender(o0)', name: 'Custom' }))
+    assert.equal(select.value, 'shader:Color Bars')
+})
+
+test('only a shader that is no library entry is a custom program', () => {
+    assert.equal(isCustomProgram(createSource('shader', { dsl: MAGENTA })), true)
+    assert.equal(isCustomProgram(createSource('shader', { dsl: 'search synth\ntestPattern(pattern: colorBars).write(o0)\nrender(o0)' })), false)
+    assert.equal(isCustomProgram(createSource('camera')), false)
+    assert.equal(isCustomProgram(null), false)
 })

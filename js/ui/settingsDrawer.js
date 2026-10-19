@@ -20,6 +20,7 @@ const SHORTCUTS = [
     ['r', 'REC (record)'],
     ['a', 'AUTO (beat-synced)'],
     ['s', 'Settings'],
+    ['⌘/Ctrl V', 'Paste program to PVW'],
 ]
 
 export function buildSettingsDrawer(container, settings, { onResolution, onFadeTime, onBeatSensitivity, onTheme } = {}) {
