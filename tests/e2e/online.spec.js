@@ -8,6 +8,7 @@
  */
 import { test, expect } from './fixtures.js'
 import { routeSeance, startSeanceServer } from './seanceLocal.js'
+import { joinSession } from './seanceRelay.js'
 import { SHADER_PRESETS } from '../../js/sources/presets.js'
 
 const preset = (name) => SHADER_PRESETS.find((p) => p.name === name).dsl
@@ -113,4 +114,74 @@ test('a refused join leaves the dialog offline, says why in the console, and lea
     await expect.poll(() => warnings.some((text) => text.includes('that session has expired or does not exist'))).toBe(true)
     await expect(page.locator('seance-dialog')).toHaveAttribute('state', 'offline')
     expect(await page.evaluate(() => window.__hd4.channels.map((c) => c.source.type))).toEqual(before)
+})
+
+const NOISE = 'search synth\nnoise(seed: 11).write(o0)\nrender(o0)'
+const MAGENTA = 'search synth\nsolid(color: #ff00ff).write(o0)\nrender(o0)'
+
+/** Hold one effect's download until release(); hit resolves when it is asked for. */
+async function holdEffect(page, path) {
+    let release, hitResolve
+    const released = new Promise((resolve) => { release = resolve })
+    const hit = new Promise((resolve) => { hitResolve = resolve })
+    await page.route(`**/effects/${path}.js`, async (route) => {
+        hitResolve()
+        await released
+        await route.continue()
+    })
+    const loaded = page.waitForResponse(`**/effects/${path}.js`)
+    return { hit, release, loaded }
+}
+
+/** Two animation frames: every promise the page had settled by now has run its callbacks. */
+const frames = (page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+
+/** Take the page online; resolves to the session code. */
+async function takeOnline(page) {
+    await page.evaluate(() => window.__hd4.online.takeOnline())
+    const code = new URL(page.url()).searchParams.get('seance')
+    expect(code).toBeTruthy()
+    return code
+}
+
+test('a newer program from the session wins over an older one still downloading its effects', async ({ page }) => {
+    await open(page)
+    const peer = await joinSession(server, await takeOnline(page))
+    try {
+        const held = await holdEffect(page, 'synth/noise')
+        await peer.editDoc('channel:3', NOISE)
+        await held.hit
+        await peer.editDoc('channel:3', MAGENTA)
+        await expect.poll(() => page.evaluate(() => window.__hd4.channels[2].source.dsl)).toBe(MAGENTA)
+        held.release()
+        await held.loaded
+        await expect.poll(() => page.evaluate(() => window.__hd4.renderers[2].inner.loadedEffects.has('synth/noise'))).toBe(true)
+        await frames(page)
+        // The older program never reaches the channel, nor goes back to the session.
+        expect(await page.evaluate(() => window.__hd4.channels[2].source.dsl)).toBe(MAGENTA)
+        await frames(page)
+        expect(peer.docText('channel:3')).toBe(MAGENTA)
+    } finally {
+        peer.close()
+    }
+})
+
+test('a person\'s own pick made while a session program downloads stays, and is shared', async ({ page }) => {
+    await open(page)
+    const peer = await joinSession(server, await takeOnline(page))
+    try {
+        const held = await holdEffect(page, 'synth/noise')
+        await peer.editDoc('channel:3', NOISE)
+        await held.hit
+        await page.selectOption(picker(3), 'shader:Grid')
+        await expect.poll(() => page.evaluate(() => window.__hd4.renderers[2].currentDsl)).toBe(preset('Grid'))
+        held.release()
+        await held.loaded
+        await expect.poll(() => page.evaluate(() => window.__hd4.renderers[2].inner.loadedEffects.has('synth/noise'))).toBe(true)
+        await frames(page)
+        expect(await page.evaluate(() => window.__hd4.channels[2].source.dsl)).toBe(preset('Grid'))
+        await expect.poll(() => peer.docText('channel:3')).toBe(preset('Grid'))
+    } finally {
+        peer.close()
+    }
 })

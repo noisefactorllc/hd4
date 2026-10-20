@@ -176,11 +176,14 @@ class HD4OnlineController {
 
     async _applyRemote(n, text, context) {
         if (!String(text ?? '').trim()) return
+        const before = this.channels[n - 1].source
         const outcome = await this.applyRemoteText(n, text, context)
-        if (outcome?.status !== 'applied') {
-            // The channel kept (or fell back to) its own source. That is no
-            // local change, so it is not published over the session's text.
-            this._seen[n - 1] = { source: this.channels[n - 1].source, pending: false }
+        // A program that failed left the channel on its own source (or put it
+        // back there). That is no local change, so it is not published over
+        // the session's text. A source the person picked meanwhile is theirs,
+        // and syncChannels shares it.
+        if (outcome?.status === 'failed' && this.channels[n - 1].source === before) {
+            this._seen[n - 1] = { source: before, pending: false }
         }
     }
 

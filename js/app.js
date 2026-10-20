@@ -828,15 +828,22 @@ async function bootInto({ container = null, audioContext = null, destination = n
     }
     // A program from the Seance session is checked first, like a pasted one,
     // so a program that does not compile never stops a running camera or clip.
+    // The check can take a while (it loads the program's effects), so a newer
+    // program from the session, or the person's own pick meanwhile, wins: the
+    // older program is then dropped (superseded), never applied over it.
+    const remoteTurns = state.channels.map(() => 0)
     const applyRemoteProgram = async (n, dsl) => {
         const channel = state.channels[n - 1]
         if (channel.source?.type === 'shader' && channel.source.dsl === dsl) return { status: 'applied' }
+        const turn = ++remoteTurns[n - 1]
+        const before = channel.source
         let problem
         try {
             problem = await state.renderers[n - 1].check(stripMediaUrls(dsl))
         } catch (e) {
             problem = e?.message || String(e)
         }
+        if (turn !== remoteTurns[n - 1] || channel.source !== before) return { status: 'superseded' }
         const outcome = problem ? { status: 'failed', message: problem } : await applySource(n, programSource(dsl))
         if (outcome.status === 'failed') console.warn(`[seance] channel ${n} program from the session was not applied`, outcome.message)
         return outcome

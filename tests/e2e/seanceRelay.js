@@ -39,6 +39,8 @@ export function joinSession(server, sessionId, { origin = PAGE_ORIGIN } = {}) {
     const partial = new Map()
     const announcements = []
     const received = []
+    const edits = new Map()
+    let authorSeq = 0
     let anonToken = null
     let ownerId = null
     let lastSend = 0
@@ -69,6 +71,18 @@ export function joinSession(server, sessionId, { origin = PAGE_ORIGIN } = {}) {
         get anonToken() { return anonToken },
         get ownerId() { return ownerId },
         docText: (id) => docs.get(id)?.text,
+
+        /**
+         * Replace a document's text as any participant can, and resolve once
+         * the server accepted the edit.
+         */
+        editDoc(docId, text) {
+            const doc = docs.get(docId)
+            const seq = ++authorSeq
+            const accepted = new Promise((resolve, reject) => edits.set(seq, { resolve, reject }))
+            ws.send(JSON.stringify({ type: 'doc-edit', docId, baseRev: doc.rev, authorSeq: seq, edit: { start: 0, end: doc.text.length, text } }))
+            return accepted
+        },
 
         /** Ask every tab to describe itself ('*' reaches only describe); remember the owner's tab. */
         async describe({ timeoutMs } = {}) {
@@ -124,6 +138,16 @@ export function joinSession(server, sessionId, { origin = PAGE_ORIGIN } = {}) {
             } else if (frame.type === 'session-snapshot' || frame.type === 'doc-snapshot') {
                 for (const doc of frame.docs || []) docs.set(doc.id, { ...doc })
                 if (frame.type === 'session-snapshot') resolve(agent)
+            } else if (frame.type === 'doc-ack' || frame.type === 'doc-reject') {
+                const doc = docs.get(frame.docId)
+                if (frame.type === 'doc-ack' && doc) {
+                    doc.text = doc.text.slice(0, frame.edit.start) + frame.edit.text + doc.text.slice(frame.edit.end)
+                    doc.rev = frame.rev
+                }
+                const waiter = edits.get(frame.authorSeq)
+                edits.delete(frame.authorSeq)
+                if (frame.type === 'doc-ack') waiter?.resolve(frame.rev)
+                else waiter?.reject(new Error(`edit refused: ${frame.reason}`))
             } else if (frame.type === 'doc-edit') {
                 const doc = docs.get(frame.docId)
                 if (doc) {
