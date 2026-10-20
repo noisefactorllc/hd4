@@ -203,7 +203,7 @@ export const COMMAND_GROUPS = [
         title: 'Images',
         commands: {
             getThumbnail: {
-                does: 'Returns an image of the program output (`program`), of the PVW channel (`preview`) or of channel 1 to 4. Through a Seance session the image is added to the session as its own bytes, and `image` replaces `bytes`; there it answers REMOTE_UNAVAILABLE while a camera, a video, an image file or a still feeds any channel or the KEY, or FREEZE holds a frame, because those stay on the person\'s computer.',
+                does: 'Returns an image of the program output (`program`), of the PVW channel (`preview`) or of channel 1 to 4. Through a Seance session the image is added to the session as its own bytes, and `image` replaces `bytes`; there it answers REMOTE_UNAVAILABLE unless every channel shows a program (a channel still showing the last frame of its previous source counts as not showing it), the KEY does not show the still and FREEZE is off, because cameras, video, images and stills stay on the person\'s computer.',
                 returns: '`{ bytes, mimeType, width, height, source, channel }`, with `bytes` in base64 and `channel` the channel shown (`null` for the program output). Through a session: `{ image: { id, mimeType, bytes }, mimeType, width, height, source, channel }`, where `image.bytes` is the byte count',
             },
         },

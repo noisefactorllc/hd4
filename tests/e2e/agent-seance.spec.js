@@ -158,9 +158,10 @@ test('an agent in the session drives the owner\'s tab and sees its monitors as i
         const hidden = await agent.call('getThumbnail', { maxDimension: 48, format: 'png', source: 3 })
         expect(hidden.envelope.error).toMatchObject({ code: 'REMOTE_UNAVAILABLE', details: { reason: 'channel 1 shows a camera' } })
         expect(uploads).toEqual([])
-        // The person replaces the camera; the built-in test card on channel 2 may be seen.
+        // The person replaces the camera and the test card with programs.
         await page.selectOption('.hd4-monitor[data-channel="1"] .hd4-source-select', 'shader:Black')
-        await expect.poll(() => page.evaluate(() => window.__hd4.channels[0].source.type)).toBe('shader')
+        await page.selectOption('.hd4-monitor[data-channel="2"] .hd4-source-select', 'shader:White')
+        await expect.poll(() => page.evaluate(() => window.__hd4.channels.every((c, i) => window.__hd4.renderers[i].showsProgram(c.source.dsl)))).toBe(true)
 
         // getThumbnail: the image is uploaded as its own bytes and named by its SHA-256.
         const look = await agent.call('getThumbnail', { maxDimension: 48, format: 'png', source: 3 })
@@ -235,8 +236,10 @@ test('a program and its image move into a channel through the session', async ({
 test('the tab takes at most 16 images in ten minutes', async ({ page }) => {
     test.setTimeout(180_000)
     const code = await openOnline(page)
-    // No camera, so the tab may send images of the mix.
+    // Only programs, so the tab may send images of the mix.
     await page.selectOption('.hd4-monitor[data-channel="1"] .hd4-source-select', 'shader:Black')
+    await page.selectOption('.hd4-monitor[data-channel="2"] .hd4-source-select', 'shader:White')
+    await expect.poll(() => page.evaluate(() => window.__hd4.channels.every((c, i) => window.__hd4.renderers[i].showsProgram(c.source.dsl)))).toBe(true)
     const agent = await joinSession(server, code)
     try {
         await agent.describe()
@@ -363,6 +366,56 @@ test('connect agent walks the person through going online, copying the prompt an
         } finally {
             second.close()
         }
+    } finally {
+        agent.close()
+    }
+})
+
+/** Hold one effect's download until release(); hit resolves when it is asked for. */
+async function holdEffect(page, path) {
+    let release, hitResolve
+    const released = new Promise((resolve) => { release = resolve })
+    const hit = new Promise((resolve) => { hitResolve = resolve })
+    await page.route(`**/effects/${path}.js`, async (route) => {
+        hitResolve()
+        await released
+        await route.continue()
+    })
+    return { hit, release }
+}
+
+test('no image leaves the tab while a channel still shows its old source', async ({ page }) => {
+    test.setTimeout(180_000)
+    const NOISE = 'search synth\nnoise(seed: 7).write(o0)\nrender(o0)'
+    const uploads = []
+    page.on('request', (request) => {
+        if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/images')) uploads.push(request.url())
+    })
+    const code = await openOnline(page)
+    // Only channel 1 (the camera) is not a program.
+    await page.selectOption('.hd4-monitor[data-channel="2"] .hd4-source-select', 'shader:Black')
+    await expect.poll(() => page.evaluate(() => window.__hd4.renderers[1].currentDsl === window.__hd4.channels[1].source.dsl)).toBe(true)
+    const agent = await joinSession(server, code)
+    try {
+        await agent.describe()
+        // The person switches the camera channel to a program whose effect is
+        // still downloading: the channel's canvas keeps the last camera frame.
+        const held = await holdEffect(page, 'synth/noise')
+        await page.evaluate((dsl) => { window.__hd4.channels[0].setSource({ type: 'shader', dsl, name: 'Custom' }) }, NOISE)
+        await held.hit
+        expect(await page.evaluate(() => window.__hd4.channels[0].source.type)).toBe('shader')
+        for (const source of ['program', 3]) {
+            const look = await agent.call('getThumbnail', { maxDimension: 16, source })
+            expect(look.envelope.error, `source ${source}`).toMatchObject({ code: 'REMOTE_UNAVAILABLE', details: { reason: 'channel 1 does not show its program yet' } })
+        }
+        expect(uploads).toEqual([])
+        held.release()
+        await expect.poll(() => agent.call('getThumbnail', { maxDimension: 16 }).then((look) => look.envelope.ok), { timeout: 30_000 }).toBe(true)
+
+        // A channel left empty keeps its last frame on screen.
+        await page.evaluate(() => window.__hd4.channels[1].clear())
+        const empty = await agent.call('getThumbnail', { maxDimension: 16, source: 3 })
+        expect(empty.envelope.error).toMatchObject({ code: 'REMOTE_UNAVAILABLE', details: { reason: 'channel 2 shows nothing' } })
     } finally {
         agent.close()
     }

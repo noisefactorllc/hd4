@@ -412,12 +412,26 @@ export async function setUserButton({ button, action }, ctx) {
 // Through a session an image may show only what the session carries. A
 // camera, a video, an image file or a still never enters it, and FREEZE can
 // hold a frame of one, so while any of them feeds the mix there is no image.
-function privateInput({ channels, composition, output }) {
-    const n = channels.findIndex(channel => isLocalMedia(channel.source))
-    if (n >= 0) return `channel ${n + 1} shows a ${channels[n].source.type}`
+// What counts is what each channel's canvas shows: a channel that switched
+// to a program keeps its previous source's last frame (a camera's, say) until
+// the program compiled and drew, and an emptied channel keeps its last frame.
+function privateInput({ channels, renderers, composition, output }) {
+    for (const [i, channel] of channels.entries()) {
+        const source = channel.source
+        if (isLocalMedia(source)) return `channel ${i + 1} shows a ${source.type}`
+        if (source?.type === 'image') return `channel ${i + 1} shows an image`
+        if (source?.type !== 'shader') return `channel ${i + 1} shows nothing`
+        if (!renderers[i].showsProgram(source.dsl)) return `channel ${i + 1} does not show its program yet`
+    }
     if (composition.key.on && composition.key.sourceCh === 5) return 'the KEY shows the still'
     if (output.freeze) return 'FREEZE holds a frame'
     return null
+}
+
+function refusePrivate(reason) {
+    return commandError('REMOTE_UNAVAILABLE',
+        `Images are not available through a session while ${reason}: cameras, video, image files and stills stay on the person's computer.`,
+        { reason })
 }
 
 // The program canvas is drawn on each animation frame. Two frames make sure
@@ -432,12 +446,20 @@ function nextFrames() {
 
 export async function getThumbnail({ maxDimension = 256, format = 'jpg', source = 'program' }, ctx, options = {}) {
     const channel = source === 'program' ? null : source === 'preview' ? ctx.preview.preview : source
-    await nextFrames()
-    const hidden = options.remote && privateInput(ctx)
-    if (hidden) {
-        throw commandError('REMOTE_UNAVAILABLE',
-            `Images are not available through a session while ${hidden}: cameras, video, image files and stills stay on the person's computer.`,
-            { reason: hidden })
+    if (!options.remote) {
+        await nextFrames()
+    } else {
+        // Every channel must show a program from before the wait to the
+        // capture, and the program output must be redrawn from them meanwhile.
+        const before = privateInput(ctx)
+        if (before) throw refusePrivate(before)
+        const compiled = ctx.renderers.map(renderer => renderer.compiled)
+        const drawn = ctx.programFrames()
+        await nextFrames()
+        const after = privateInput(ctx)
+            || (ctx.renderers.some((renderer, i) => renderer.compiled !== compiled[i]) && 'a channel changes its program')
+            || (channel === null && ctx.programFrames() === drawn && 'the program output is not being drawn (the tab is hidden)')
+        if (after) throw refusePrivate(after)
     }
     const live = channel ? ctx.channels[channel - 1].canvas : ctx.programCanvas
     const scale = Math.min(1, maxDimension / Math.max(live.width, live.height, 1))

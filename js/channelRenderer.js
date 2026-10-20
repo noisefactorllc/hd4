@@ -54,12 +54,25 @@ export class ChannelRenderer {
         this._compileSeq = 0 // the newest compile; an older one that finishes late is dropped
         this._engineTurn = Promise.resolve() // engine compiles run one at a time, in order
         this._currentDsl = ''
+        this._compiled = 0
         this._mediaStep = null
         this._lastSize = null
         this._fitMode = 'cover' // 'cover' (zoom/crop) | 'contain' (scale)
     }
 
     get currentDsl() { return this._currentDsl }
+
+    /**
+     * Does the canvas show this program? Only once it compiled and at least one
+     * frame of it was drawn (the engine counts frames from each compile); until
+     * then the canvas still holds the previous program's last frame.
+     */
+    showsProgram(dsl) {
+        return this._currentDsl === dsl && this._renderer.frameCount > 0
+    }
+
+    /** Changes with every program the renderer takes on. */
+    get compiled() { return this._compiled }
     get isRunning() { return !!this._renderer.isRunning }
     get fitMode() { return this._fitMode }
     setFitMode(mode) { this._fitMode = mode === 'contain' ? 'contain' : 'cover' }
@@ -108,6 +121,7 @@ export class ChannelRenderer {
             await turn
             if (superseded()) return { success: false, superseded: true }
             this._currentDsl = dsl
+            this._compiled++
             this._mediaStep = this._discoverMediaStep(dsl)
             this._lastSize = null
             const missingImages = await bindProgramImages(this._renderer, dsl, extractEffectsFromDsl, () => !superseded())

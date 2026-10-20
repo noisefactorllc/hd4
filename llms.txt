@@ -82,13 +82,15 @@ How it works, so you can explain it to the person:
   person goes offline (**Go Offline** in the same dialog) when you are done.
 - `look` asks the person's tab for an image of a monitor. The tab adds the
   image to the session as its own bytes, and the tool saves it as a file.
-  While a camera, a video, an image file or a still feeds any channel or the
-  KEY, or FREEZE holds a frame, `look` answers `REMOTE_UNAVAILABLE`: those
-  stay on the person's computer. HD4 starts with a camera on channel 1 and the
-  test card image on channel 2 (the test card is part of HD4 and may be seen),
-  so ask the person to replace the camera with a program or a library source
-  first. Through a session, `getProgram` answers with the text the session
-  holds, and a local source goes by its kind, never by its file name.
+  `look` works only while every channel shows a program (a shader program or
+  a pattern or fill from the source library) and FREEZE is off. While a
+  channel shows a camera, a video, an image or a still, or still shows the
+  last frame of one while its new program starts, or the KEY shows the still,
+  `look` answers `REMOTE_UNAVAILABLE`: those stay on the person's computer.
+  HD4 starts with a camera on channel 1 and the test card on channel 2, so ask
+  the person to put programs or library sources on them first. Through a
+  session, `getProgram` answers with the text the session holds, and a local
+  source goes by its kind, never by its file name.
 - A session holds at most 32 images, and the person's own images need room
   too. The tab takes at most 16 images in ten minutes; past that, `look`
   answers `IMAGE_LIMIT` with `details.retryAfter` in seconds. Look when the

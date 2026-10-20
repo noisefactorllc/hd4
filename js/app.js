@@ -985,6 +985,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         still: stillStore,
         recorder,
         programCanvas: programView.canvas,
+        programFrames: () => programFrames,
         getOnline: () => online,
         controls,
     })
@@ -1017,6 +1018,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
     }
 
     // --- Per-frame loop ---
+    let programFrames = 0 // program output frames drawn, for the agent's images
     const frame = (t) => {
         for (const ch of state.channels) ch.tick()
         online?.syncChannels()
@@ -1053,6 +1055,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         const pres = switcher.tick(t)
         const out = { ...output.tick(t), ...compositorState.snapshot() }
         compositor.draw(pres, switcher.type, out)
+        programFrames++
         programOutput.publish(t)
         programView.setLive(switcher.live, switcher.transitioning)
         previewView.drawSource(state.channels[previewBus.preview - 1]?.canvas)
