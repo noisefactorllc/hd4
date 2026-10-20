@@ -160,12 +160,15 @@ class HD4OnlineController {
         }
     }
 
-    /** Send a channel's text to the session. False when it cannot go yet. */
+    /**
+     * Send a channel's text to the session. False when it cannot go yet: only
+     * an online session takes it (while a new session connects, its first
+     * snapshot would replace the text).
+     */
     _publish(n, text) {
         const i = n - 1
         if (this._docText[i] === text) return true
-        const status = this.getStatus()
-        if (!this.online || !this.getSessionId() || status === 'offline' || status === 'readonly') return false
+        if (!this.online || this.getStatus() !== 'online' || !this.getSessionId()) return false
         this._docText[i] = text
         this.online.updateLocalText(docIdForChannel(n), text, { source: 'channel' })
         return true
@@ -207,7 +210,15 @@ class HD4OnlineController {
             this._closeActiveSession()
             const docs = this._seedDocs()
             this._adoptLocalState(docs)
-            await this.online.takeOnline(docs)
+            // The new session's first snapshot is this tab's own seed: it is
+            // not applied back, since the person may have changed a channel
+            // while the session was being created (syncChannels shares that).
+            this._ownSeed = true
+            try {
+                await this.online.takeOnline(docs)
+            } finally {
+                this._ownSeed = false
+            }
             if (version !== this._actionVersion) return
             // The relay answers agents only in a session this tab took online.
             this.agentRelay?.sessionCreated(this.online.getSessionId())
@@ -404,6 +415,7 @@ class HD4OnlineController {
                 getText: () => this._docText[n - 1],
                 setText: (text) => { this._docText[n - 1] = String(text ?? '') },
                 onRemoteText: (text, context) => {
+                    if (this._ownSeed && context?.source === 'snapshot') return
                     this._applyRemote(n, text, context).catch((err) => console.error('[seance] remote program not applied', err))
                 },
             })
