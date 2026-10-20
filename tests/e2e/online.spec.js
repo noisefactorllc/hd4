@@ -201,3 +201,29 @@ test('a program from the session never replaces a camera, video, image or still'
         peer.close()
     }
 })
+
+test('a change that compiles while the session is being created is shared once it exists', async ({ page }) => {
+    await open(page)
+    // Hold the session's creation, so the person's pick lands after the seed.
+    let release, hitResolve
+    const released = new Promise((resolve) => { release = resolve })
+    const hit = new Promise((resolve) => { hitResolve = resolve })
+    await page.route(`${server.url}/v1/sessions`, async (route) => {
+        hitResolve()
+        await released
+        await route.continue()
+    })
+    const online = page.evaluate(() => window.__hd4.online.takeOnline())
+    await hit
+    await page.selectOption(picker(3), 'shader:Grid')
+    await expect.poll(() => page.evaluate(() => window.__hd4.renderers[2].currentDsl)).toBe(preset('Grid'))
+    await frames(page)
+    release()
+    await online
+    const peer = await joinSession(server, new URL(page.url()).searchParams.get('seance'))
+    try {
+        await expect.poll(() => peer.docText('channel:3')).toBe(preset('Grid'))
+    } finally {
+        peer.close()
+    }
+})

@@ -155,18 +155,20 @@ class HD4OnlineController {
             if (!seen.pending) continue
             // A program that is still compiling, or that fails and falls back, waits.
             if (source?.type === 'shader' && this.renderers[n - 1].currentDsl !== source.dsl) continue
-            seen.pending = false
-            this._publish(n, channelProgramText(source))
+            // A change that cannot be sent yet (the session is being created) waits too.
+            if (this._publish(n, channelProgramText(source))) seen.pending = false
         }
     }
 
+    /** Send a channel's text to the session. False when it cannot go yet. */
     _publish(n, text) {
         const i = n - 1
-        if (!this.online || this._docText[i] === text) return
+        if (this._docText[i] === text) return true
         const status = this.getStatus()
-        if (!this.getSessionId() || status === 'offline' || status === 'readonly') return
+        if (!this.online || !this.getSessionId() || status === 'offline' || status === 'readonly') return false
         this._docText[i] = text
         this.online.updateLocalText(docIdForChannel(n), text, { source: 'channel' })
+        return true
     }
 
     /** The text the session holds for a channel, or '' when offline. */
@@ -211,6 +213,8 @@ class HD4OnlineController {
             this.agentRelay?.sessionCreated(this.online.getSessionId())
             this._writeSessionToUrl(this.online.getSessionId())
             this.syncStatusUi()
+            // A change that finished while the session was being created goes now.
+            this.syncChannels()
         } catch (err) {
             console.error('[seance] take online failed', err)
             if (!this._refusalAnnounced) this._announce(`online failed: ${refusalMessage(err) || err?.message || err}`)
