@@ -177,6 +177,13 @@ test('an agent in the session drives the owner\'s tab and sees its monitors as i
         // Images are images: no WebSocket frame from the tab carried image text.
         expect(sent.filter((frame) => frame.includes(image.bytes.toString('base64')) || /data:image|[A-Za-z0-9+/]{200,}/.test(frame))).toEqual([])
 
+        // The person's still is theirs: no session command reaches it.
+        for (const [command, args] of [['setSource', { channel: 4, source: 'still' }], ['setKey', { on: true, source: 'still' }]]) {
+            const answer = await agent.call(command, args)
+            expect(answer.envelope.error?.code, command).toBe('REMOTE_UNAVAILABLE')
+        }
+        expect(await page.evaluate(() => window.__hd4.composition.key.on)).toBe(false)
+
         // FREEZE can hold a frame of a camera, so it hides images too.
         await page.evaluate(() => window.HD4Agent.setOutput({ freeze: true }))
         const frozen = await agent.call('getThumbnail', { maxDimension: 16 })

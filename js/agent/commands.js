@@ -263,8 +263,16 @@ export async function getEffectDefinition({ effectId }, ctx) {
     }
 }
 
-export async function setSource({ channel, source }, ctx, options) {
+// A still is the person's capture of their program: through a session no
+// command shows it, as no command reaches what the browser keeps.
+function refuseStill(command) {
+    return commandError('REMOTE_UNAVAILABLE',
+        `${command} with the still is not available through a session: the still stays on the person's computer.`, {})
+}
+
+export async function setSource({ channel, source }, ctx, options = {}) {
     const n = channelOrPreview(channel, ctx)
+    if (source === 'still' && options.remote) throw refuseStill('setSource')
     if (source === 'still') {
         const outcome = await ctx.controls.setChannelStill(n)
         if (outcome.status === 'missing') {
@@ -328,7 +336,8 @@ export async function setComposition(args, ctx) {
     return { result: { mode: snap.composition, pinp: snap.pinp, split: snap.split } }
 }
 
-export async function setKey({ source, ...rest }, ctx) {
+export async function setKey({ source, ...rest }, ctx, options = {}) {
+    if (source === 'still' && options.remote) throw refuseStill('setKey')
     const partial = { ...rest }
     if (source !== undefined) partial.sourceCh = source === 'still' ? 5 : source
     ctx.controls.setKey(partial)

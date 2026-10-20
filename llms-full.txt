@@ -76,8 +76,9 @@ How it works, so you can explain it to the person:
   session can send commands to that tab. So what the person keeps in this
   browser is not reachable through a session: the memory slots (`listMemory`,
   `saveMemory`, `recallMemory`), the settings and USER buttons (`getSettings`,
-  `setSettings`, `setUserButton`), stored stills (`captureStill`) and device
-  names (`listDevices`) answer `REMOTE_UNAVAILABLE`. So do the commands that
+  `setSettings`, `setUserButton`), stills (`captureStill`, and `still` as a
+  source in `setSource` or `setKey`) and device names (`listDevices`) answer
+  `REMOTE_UNAVAILABLE`. So do the commands that
   need the person at the browser: camera or microphone permission
   (`setCameraSource`, `setAudioInput`), a recording download (`setRecording`)
   and a pop-up window (`openViewport`). `commands` marks them. Suggest that the
@@ -453,7 +454,7 @@ Arguments:
 
 #### `setSource`
 
-Shows a pattern or a fill from the source library on a channel, or `still`, the still captured in this page (see captureStill). `channel` defaults to the PVW channel.
+Shows a pattern or a fill from the source library on a channel, or `still`, the still captured in this page (see captureStill; not through a Seance session). `channel` defaults to the PVW channel.
 
 Returns: `{ channel, source, name }`.
 
@@ -580,7 +581,7 @@ Arguments:
 
 #### `setKey`
 
-Sets the KEY overlay: on or off, `chroma` or `luma`, its source (a channel or `still`), LEVEL and GAIN (0 to 255) and the key colour. Turning the key on with no source keys channel 1. Omitted fields keep their value.
+Sets the KEY overlay: on or off, `chroma` or `luma`, its source (a channel, or `still`, which a Seance session cannot use), LEVEL and GAIN (0 to 255) and the key colour. Turning the key on with no source keys channel 1. Omitted fields keep their value.
 
 Returns: `{ on, type, source, level, gain, chromaColor, lumaColor }`, where `source` is a channel, `still` or `null`.
 

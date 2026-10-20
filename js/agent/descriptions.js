@@ -64,7 +64,7 @@ export const COMMAND_GROUPS = [
         title: 'Channels',
         commands: {
             setSource: {
-                does: 'Shows a pattern or a fill from the source library on a channel, or `still`, the still captured in this page (see captureStill). `channel` defaults to the PVW channel.',
+                does: 'Shows a pattern or a fill from the source library on a channel, or `still`, the still captured in this page (see captureStill; not through a Seance session). `channel` defaults to the PVW channel.',
                 returns: '`{ channel, source, name }`',
             },
             setChannelOptions: {
@@ -112,7 +112,7 @@ export const COMMAND_GROUPS = [
                 returns: '`{ mode, pinp, split }`',
             },
             setKey: {
-                does: 'Sets the KEY overlay: on or off, `chroma` or `luma`, its source (a channel or `still`), LEVEL and GAIN (0 to 255) and the key colour. Turning the key on with no source keys channel 1. Omitted fields keep their value.',
+                does: 'Sets the KEY overlay: on or off, `chroma` or `luma`, its source (a channel, or `still`, which a Seance session cannot use), LEVEL and GAIN (0 to 255) and the key colour. Turning the key on with no source keys channel 1. Omitted fields keep their value.',
                 returns: '`{ on, type, source, level, gain, chromaColor, lumaColor }`, where `source` is a channel, `still` or `null`',
             },
         },
