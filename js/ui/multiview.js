@@ -49,6 +49,10 @@ export function buildMultiview(container, channels, {
         setStillAvailable(on) {
             tiles.forEach((t, i) => { t.setStillAvailable(on); t.syncSelect(channels[i].source) })
         },
+        /** Offer Connect agent… (under Go online…) or not. */
+        setConnectAgentAvailable(on) {
+            tiles.forEach((t, i) => { t.setConnectAgentAvailable(on); t.syncSelect(channels[i].source) })
+        },
     }
 }
 
@@ -91,6 +95,7 @@ function buildTile(channel, index, { onSelectSource, canGoOnline, canConnectAgen
         updateAutoInclude(on) { auto.update(on) },
         updateCameras(list) { picker.updateCameras(list) },
         setStillAvailable(on) { picker.setStillAvailable(on) },
+        setConnectAgentAvailable(on) { picker.setConnectAgentAvailable(on) },
     }
 }
 
@@ -127,17 +132,25 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false, canConn
     // Go online… (and Connect agent… under it) stay last in the group:
     // Custom is inserted before them.
     let onlineOption = null
+    let agentOption = null
     if (canGoOnline) {
         onlineOption = document.createElement('option')
         onlineOption.value = 'online'
         onlineOption.textContent = 'Go online…'
         programGroup.appendChild(onlineOption)
         if (canConnectAgent) {
-            const agentOption = document.createElement('option')
+            agentOption = document.createElement('option')
             agentOption.value = 'agent'
             agentOption.textContent = 'Connect agent…'
             programGroup.appendChild(agentOption)
         }
+    }
+
+    /** Offer Connect agent… right under Go online…, or take it away. */
+    function setConnectAgentAvailable(on) {
+        if (!agentOption) return
+        if (on && !agentOption.isConnected) onlineOption.after(agentOption)
+        else if (!on && agentOption.isConnected) agentOption.remove()
     }
 
     select.append(camGroup, fileGroup, captureGroup, programGroup)
@@ -239,7 +252,7 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false, canConn
     const control = document.createElement('span')
     control.className = 'hd4-source-control'
     control.append(select, fileInput)
-    return { control, select, sync, updateCameras, setStillAvailable }
+    return { control, select, sync, updateCameras, setStillAvailable, setConnectAgentAvailable }
 }
 
 /** A shader source that is no library entry: a pasted program. */

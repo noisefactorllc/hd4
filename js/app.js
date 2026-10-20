@@ -1005,6 +1005,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
                     contractUrl: 'https://hd4.noisefactor.io/llms-full.txt',
                     sessionUrl,
                 }),
+                // Connect agent… only where an agent can be answered.
+                onSessionChange: (controller) => multiview.setConnectAgentAvailable(controller.canConnectAgent()),
                 location: window.location,
                 history: window.history,
                 clipboard: navigator.clipboard,

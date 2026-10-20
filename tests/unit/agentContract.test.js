@@ -44,7 +44,8 @@ test('the relay keeps the shared wire protocol', async () => {
     // session; '*' reaches only describe; no image crosses as text.
     assert.match(source, /const answering = \(\) => Boolean\(self\) && self === owner && created\.has\(session\)/)
     assert.match(source, /\} else if \(frame\.to !== tabId\) \{\n\s+return\n/)
-    assert.match(source, /return \{ WebSocket: RelaySocket, tabId, sessionCreated \}/)
+    assert.match(source, /return \{ WebSocket: RelaySocket, tabId, sessionCreated, answers: answering \}/)
+    assert.match(source, /agents\.has\(frame\.connection_id\)/)
     assert.match(source, /'IMAGE_AS_TEXT'/)
     assert.match(source, /'OUTSIDE_LINK'/)
     assert.match(source, /onAgent\?\.\(\{ userId: frame\.user_id/)

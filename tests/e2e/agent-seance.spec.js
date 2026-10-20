@@ -5,6 +5,7 @@
  * channel documents change, and gets images as uploaded bytes, never as text.
  * Runs against a local Seance server (seanceLocal.js).
  */
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { deflateSync } from 'node:zlib'
 import { test, expect } from './fixtures.js'
@@ -111,6 +112,11 @@ test('an agent in the session drives the owner\'s tab and sees its monitors as i
         expect(commands.setRecording.remote).toBe(false)
         expect(commands.saveMemory.remote).toBe(false)
         expect(commands.take.remote).toBe(true)
+        // With the connect-agent dialog closed, an agent's arrival changes nothing on screen.
+        expect(await page.evaluate(() => {
+            const dialog = document.getElementById('agent-connect-dialog')
+            return { open: dialog.open, connected: dialog.connected }
+        })).toEqual({ open: false, connected: false })
 
         // A read command.
         const state = await agent.call('getState')
@@ -261,6 +267,12 @@ test('a tab that inherits the session does not answer, and the person\'s tab ans
     try {
         const first = await agent.describe()
         const firstOwner = agent.ownerId
+        // Only the tab that took the session online offers Connect agent…; the
+        // visitor joined someone else's session, where no agent can be answered.
+        const program = (p) => p.locator('.hd4-monitor[data-channel="3"] .hd4-source-select optgroup[label="Program"] option').allTextContents()
+        expect((await program(page)).slice(-2)).toEqual(['Go online…', 'Connect agent…'])
+        expect((await program(visitor)).slice(-1)).toEqual(['Go online…'])
+        expect(await visitor.evaluate(() => window.__hd4.online.canConnectAgent())).toBe(false)
 
         // The person's tab reloads: it took the session online, so it answers again.
         await page.reload()
@@ -289,7 +301,7 @@ test('connect agent walks the person through going online, copying the prompt an
     await page.goto('/')
     await page.waitForFunction(() => window.__hd4?.ready === true && window.HD4Agent, null, { timeout: 30_000 })
     expect(await page.evaluate(() => Boolean(customElements.get('agent-connect-dialog'))),
-        'Set HANDFISH_DIST to a handfish build that has <agent-connect-dialog>.').toBe(true)
+        'The loaded handfish has no <agent-connect-dialog>.').toBe(true)
 
     // Connect agent… sits right under Go online…, and the picker keeps its source.
     const picker = '.hd4-monitor[data-channel="2"] .hd4-source-select'
@@ -310,28 +322,47 @@ test('connect agent walks the person through going online, copying the prompt an
 
     await dialog.locator('[data-action="copy-prompt"]').click()
     await expect.poll(states).toEqual(['done', 'done', 'active'])
-    const prompt = (await page.evaluate(() => navigator.clipboard.readText())).trim().split('\n')
-    expect(prompt.slice(0, 4)).toEqual([
+    const copied = await page.evaluate(() => navigator.clipboard.readText())
+    // The prompt is the one handfish builds for every app: page and code only, quoted.
+    const expected = await page.evaluate(async (sessionUrl) => (await import('handfish')).agentConnectPrompt({
+        app: 'HD4', contractUrl: 'https://hd4.noisefactor.io/llms-full.txt', sessionUrl,
+    }), `${PAGE_ORIGIN}/?seance=${code}`)
+    expect(copied).toBe(expected)
+    const prompt = copied.trim().split('\n')
+    expect(prompt).toEqual([
         'Connect to my HD4 session and help me with it.',
         'Read https://hd4.noisefactor.io/llms-full.txt first.',
         'Then run:',
         '  curl -fsSLO https://noisedeck.app/agent/seance-agent.mjs',
+        `  node seance-agent.mjs join '${PAGE_ORIGIN}/?seance=${code}'`,
     ])
-    expect(prompt[4]).toMatch(/^ {2}node seance-agent\.mjs join /)
-    // The agent follows the prompt's last line: the session link.
-    const link = new URL(prompt[4].trim().split(' ').at(-1).replace(/['"]/g, ''))
-    expect(`${link.origin}${link.pathname}`).toBe(`${PAGE_ORIGIN}/`)
-    expect(link.searchParams.get('seance')).toBe(code)
+    // The prompt's last line runs in a real shell as written; a stand-in for
+    // the agent tool reports the arguments the shell hands it.
+    const line = prompt.at(-1).trim()
+        .replace('node seance-agent.mjs', `"${process.execPath}" -e "console.log(JSON.stringify(process.argv.slice(1)))" --`)
+    const argv = await new Promise((done, fail) => execFile('/bin/sh', ['-c', line], (error, stdout) => error ? fail(error) : done(JSON.parse(stdout))))
+    expect(argv).toEqual(['join', `${PAGE_ORIGIN}/?seance=${code}`])
 
-    const agent = await joinSession(server, link.searchParams.get('seance'))
+    const agent = await joinSession(server, new URL(argv[1]).searchParams.get('seance'))
     try {
         expect((await agent.describe()).envelope.result.app).toBe('hd4')
         await expect.poll(states).toEqual(['done', 'done', 'done'])
         await expect(dialog).toBeHidden({ timeout: 10_000 })
-        // Opened again while online, the dialog starts at the prompt.
+        // Opened again while online, the dialog starts at the prompt and waits
+        // for the next agent: a second connection confirms it.
         await page.selectOption(picker, 'agent')
         await expect(dialog).toBeVisible()
         await expect.poll(states).toEqual(['done', 'active', 'pending'])
+        await dialog.locator('[data-action="copy-prompt"]').click()
+        await expect.poll(states).toEqual(['done', 'done', 'active'])
+        const second = await joinSession(server, code)
+        try {
+            await second.describe()
+            await expect.poll(states).toEqual(['done', 'done', 'done'])
+            await expect(dialog).toBeHidden({ timeout: 10_000 })
+        } finally {
+            second.close()
+        }
     } finally {
         agent.close()
     }

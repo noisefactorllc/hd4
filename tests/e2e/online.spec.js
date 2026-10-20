@@ -73,6 +73,11 @@ test('Take Online shares the channel programs, and a second HD4 joins with the l
         // ... and empty documents (the host's camera and test card) are never applied.
         expect(await other.evaluate(() => window.__hd4.channels.map((c) => c.source.type))).toEqual(['camera', 'image', 'shader', 'shader'])
 
+        // The joined HD4 does not offer Connect agent…: no agent can be answered there.
+        const offered = (p) => p.locator(`${picker(1)} optgroup[label="Program"] option`).allTextContents()
+        expect((await offered(other)).at(-1)).toBe('Go online…')
+        expect((await offered(page)).slice(-2)).toEqual(['Go online…', 'Connect agent…'])
+
         // A change on the second HD4 reaches the first.
         await other.selectOption(picker(4), 'shader:Blue')
         await expect.poll(() => page.evaluate(() => window.__hd4.channels[3].source.dsl)).toBe(preset('Blue'))

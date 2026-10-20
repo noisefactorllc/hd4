@@ -24,7 +24,9 @@
  * agent: its Go Online step takes the channels online as the go-online dialog
  * does, it copies a prompt that names the agent contract and the session link,
  * and it confirms once the agent's first request reaches this tab (the relay's
- * onAgent).
+ * onAgent, for the first request on each connection). Each opening waits for
+ * the next agent. It is offered only where an agent can be answered
+ * (canConnectAgent).
  */
 
 import { forgetImages, setImageResolver } from './programImages.js'
@@ -101,6 +103,7 @@ class HD4OnlineController {
         dialog,
         agentDialog = null,
         agentPrompt = null,
+        onSessionChange = null,
         location = globalThis.location,
         history = globalThis.history,
         clipboard = globalThis.navigator?.clipboard,
@@ -122,6 +125,7 @@ class HD4OnlineController {
         this.dialog = dialog
         this.agentDialog = agentDialog
         this.agentPrompt = agentPrompt
+        this.onSessionChange = onSessionChange
         this.location = location
         this.history = history
         this.clipboard = clipboard
@@ -248,6 +252,18 @@ class HD4OnlineController {
         this.agentDialog?.show?.()
     }
 
+    /**
+     * Connect agent… helps only where an agent can be answered: offline (going
+     * online makes this tab the session's), or online in the session this tab
+     * took online. A tab that joined someone else's session cannot.
+     */
+    canConnectAgent() {
+        if (!this.agentDialog) return false
+        const status = this.getStatus()
+        if (status === 'offline' || status === 'connecting') return true
+        return Boolean(this.agentRelay?.answers?.())
+    }
+
     goOffline() {
         this._actionVersion++
         if (this.agentDialog) this.agentDialog.connected = false
@@ -285,6 +301,7 @@ class HD4OnlineController {
             this.agentDialog.state = this.dialog.state
             this.agentDialog.prompt = shareUrl && this.agentPrompt ? this.agentPrompt(shareUrl) : ''
         }
+        this.onSessionChange?.(this)
     }
 
     /** Say why something did not work; the dialog shows the state itself. */
@@ -301,8 +318,10 @@ class HD4OnlineController {
                 // The agent relay rides the SDK's own socket (agent/relay.js).
                 this.agentRelay = this.createAgentRelay?.({
                     uploadImage: (blob) => this.online.uploadImage(blob),
+                    // The open dialog lights its last step and confirms as it
+                    // closes. With it closed HD4 shows nothing of its own.
                     onAgent: () => {
-                        if (this.agentDialog) this.agentDialog.connected = true
+                        if (this.agentDialog?.open) this.agentDialog.connected = true
                     },
                 }) || null
                 this.online = sdk.createOnlineDslLayer({
