@@ -185,3 +185,19 @@ test('a person\'s own pick made while a session program downloads stays, and is 
         peer.close()
     }
 })
+
+test('a program from the session never replaces a camera, video, image or still', async ({ page }) => {
+    await open(page)
+    const peer = await joinSession(server, await takeOnline(page))
+    try {
+        // Channel 1 runs the camera and is on air; channel 2 shows the test card.
+        await peer.editDoc('channel:1', MAGENTA)
+        await peer.editDoc('channel:2', MAGENTA)
+        await peer.editDoc('channel:3', MAGENTA)
+        await expect.poll(() => page.evaluate(() => window.__hd4.renderers[2].currentDsl)).toBe(MAGENTA)
+        await frames(page)
+        expect(await page.evaluate(() => window.__hd4.channels.map((c) => c.source.type))).toEqual(['camera', 'image', 'shader', 'shader'])
+    } finally {
+        peer.close()
+    }
+})

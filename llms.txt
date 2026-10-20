@@ -69,7 +69,9 @@ How it works, so you can explain it to the person:
 - The session holds one document per channel, `channel:1` to `channel:4`. A
   channel that runs a shader program holds its program text. A channel that
   shows a camera, a video or an image holds empty text: cameras, video and
-  image files never leave the person's computer.
+  image files never leave the person's computer. Text written into a
+  document reaches only a channel that shows a program; `setProgram` is how
+  an agent puts a program on any channel.
 - Everyone in the session receives every answer, and anyone who can edit the
   session can send commands to that tab. So what the person keeps in this
   browser is not reachable through a session: the memory slots (`listMemory`,

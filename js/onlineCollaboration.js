@@ -6,8 +6,8 @@
  * four documents, `channel:1` .. `channel:4`, of kind `noisemaker-dsl`. A
  * channel whose source is a shader program holds that program's text; any
  * other channel holds empty text. Cameras, video and image files never leave
- * this computer: empty text is never applied, so a peer's camera channel
- * keeps its camera.
+ * this computer, and a program from the session goes only to a channel that
+ * shows a program: a camera, video, image or still channel keeps its source.
  *
  * A channel change is published once its program runs. A program from the
  * session is applied to its channel like a pasted one: a program that does

@@ -834,7 +834,10 @@ async function bootInto({ container = null, audioContext = null, destination = n
     const remoteTurns = state.channels.map(() => 0)
     const applyRemoteProgram = async (n, dsl) => {
         const channel = state.channels[n - 1]
-        if (channel.source?.type === 'shader' && channel.source.dsl === dsl) return { status: 'applied' }
+        // Session text goes only to a channel that shows a program: a camera,
+        // a video, an image or a still stays, the one on air included.
+        if (channel.source?.type !== 'shader') return { status: 'ignored' }
+        if (channel.source.dsl === dsl) return { status: 'applied' }
         const turn = ++remoteTurns[n - 1]
         const before = channel.source
         let problem
