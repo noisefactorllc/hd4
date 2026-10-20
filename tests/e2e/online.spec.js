@@ -227,3 +227,11 @@ test('a change that compiles while the session is being created is shared once i
         peer.close()
     }
 })
+
+test('the snapshot names a session only while the tab is in one', async ({ page }) => {
+    await open(page)
+    const code = await takeOnline(page)
+    expect((await page.evaluate(() => window.HD4Agent.getState())).result.online).toEqual({ status: 'online', session: code })
+    await page.evaluate(() => window.__hd4.online.goOffline())
+    expect((await page.evaluate(() => window.HD4Agent.getState())).result.online).toEqual({ status: 'offline', session: null })
+})

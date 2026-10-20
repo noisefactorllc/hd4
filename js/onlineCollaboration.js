@@ -279,7 +279,12 @@ class HD4OnlineController {
         this.syncStatusUi()
     }
 
+    /**
+     * The session this tab is in, or null. The SDK keeps the id of a session
+     * after it left it, so the id counts only while online or connecting.
+     */
     getSessionId() {
+        if (!['online', 'readonly', 'connecting'].includes(this.getStatus())) return null
         return this.online?.getSessionId?.() || null
     }
 
