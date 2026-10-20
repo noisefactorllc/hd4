@@ -1017,7 +1017,10 @@ async function bootInto({ container = null, audioContext = null, destination = n
                     sessionUrl,
                 }),
                 // Connect agent… only where an agent can be answered.
-                onSessionChange: (controller) => multiview.setConnectAgentAvailable(controller.canConnectAgent()),
+                onSessionChange: (controller) => {
+                    multiview.setConnectAgentAvailable(controller.canConnectAgent())
+                    multiview.setOnline(['online', 'readonly'].includes(controller.getStatus()))
+                },
                 location: window.location,
                 history: window.history,
                 clipboard: navigator.clipboard,

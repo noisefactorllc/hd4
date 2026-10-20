@@ -53,6 +53,10 @@ export function buildMultiview(container, channels, {
         setConnectAgentAvailable(on) {
             tiles.forEach((t, i) => { t.setConnectAgentAvailable(on); t.syncSelect(channels[i].source) })
         },
+        /** Online, Go online… reads Go offline…: it opens the session, where Go Offline is. */
+        setOnline(on) {
+            tiles.forEach((t) => t.setOnline(on))
+        },
     }
 }
 
@@ -96,6 +100,7 @@ function buildTile(channel, index, { onSelectSource, canGoOnline, canConnectAgen
         updateCameras(list) { picker.updateCameras(list) },
         setStillAvailable(on) { picker.setStillAvailable(on) },
         setConnectAgentAvailable(on) { picker.setConnectAgentAvailable(on) },
+        setOnline(on) { picker.setOnline(on) },
     }
 }
 
@@ -144,6 +149,10 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false, canConn
             agentOption.textContent = 'Connect agent…'
             programGroup.appendChild(agentOption)
         }
+    }
+
+    function setOnline(on) {
+        if (onlineOption) onlineOption.textContent = on ? 'Go offline…' : 'Go online…'
     }
 
     /** Offer Connect agent… right under Go online…, or take it away. */
@@ -252,7 +261,7 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false, canConn
     const control = document.createElement('span')
     control.className = 'hd4-source-control'
     control.append(select, fileInput)
-    return { control, select, sync, updateCameras, setStillAvailable, setConnectAgentAvailable }
+    return { control, select, sync, updateCameras, setStillAvailable, setConnectAgentAvailable, setOnline }
 }
 
 /** A shader source that is no library entry: a pasted program. */

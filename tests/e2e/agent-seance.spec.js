@@ -280,8 +280,9 @@ test('a tab that inherits the session does not answer, and the person\'s tab ans
         // Only the tab that took the session online offers Connect agent…; the
         // visitor joined someone else's session, where no agent can be answered.
         const program = (p) => p.locator('.hd4-monitor[data-channel="3"] .hd4-source-select optgroup[label="Program"] option').allTextContents()
-        expect((await program(page)).slice(-2)).toEqual(['Go online…', 'Connect agent…'])
-        expect((await program(visitor)).slice(-1)).toEqual(['Go online…'])
+        // Both are online, so the item that went online offers going offline.
+        expect((await program(page)).slice(-2)).toEqual(['Go offline…', 'Connect agent…'])
+        expect((await program(visitor)).slice(-1)).toEqual(['Go offline…'])
         expect(await visitor.evaluate(() => window.__hd4.online.canConnectAgent())).toBe(false)
 
         // The person's tab reloads: it took the session online, so it answers again.

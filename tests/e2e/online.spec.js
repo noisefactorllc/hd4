@@ -74,10 +74,11 @@ test('Take Online shares the channel programs, and a second HD4 joins with the l
         // ... and empty documents (the host's camera and test card) are never applied.
         expect(await other.evaluate(() => window.__hd4.channels.map((c) => c.source.type))).toEqual(['camera', 'image', 'shader', 'shader'])
 
-        // The joined HD4 does not offer Connect agent…: no agent can be answered there.
+        // Online, Go online… reads Go offline…. The joined HD4 does not offer
+        // Connect agent…: no agent can be answered there.
         const offered = (p) => p.locator(`${picker(1)} optgroup[label="Program"] option`).allTextContents()
-        expect((await offered(other)).at(-1)).toBe('Go online…')
-        expect((await offered(page)).slice(-2)).toEqual(['Go online…', 'Connect agent…'])
+        expect((await offered(other)).at(-1)).toBe('Go offline…')
+        expect((await offered(page)).slice(-2)).toEqual(['Go offline…', 'Connect agent…'])
 
         // A change on the second HD4 reaches the first.
         await other.selectOption(picker(4), 'shader:Blue')
@@ -99,6 +100,8 @@ test('Take Online shares the channel programs, and a second HD4 joins with the l
     await dialog.getByRole('button', { name: 'Go Offline' }).click()
     await expect(page.locator('seance-dialog')).toHaveAttribute('state', 'offline')
     expect(new URL(page.url()).searchParams.get('seance')).toBeNull()
+    expect((await page.locator(`${picker(1)} optgroup[label="Program"] option`).allTextContents()).slice(-2))
+        .toEqual(['Go online…', 'Connect agent…'])
     expect(errors).toEqual([])
 })
 
