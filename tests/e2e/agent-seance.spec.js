@@ -281,8 +281,8 @@ test('a tab that inherits the session does not answer, and the person\'s tab ans
         // visitor joined someone else's session, where no agent can be answered.
         const program = (p) => p.locator('.hd4-monitor[data-channel="3"] .hd4-source-select optgroup[label="Program"] option').allTextContents()
         // Both are online, so the item that went online offers going offline.
-        expect((await program(page)).slice(-2)).toEqual(['Go offline…', 'Connect agent…'])
-        expect((await program(visitor)).slice(-1)).toEqual(['Go offline…'])
+        expect((await program(page)).slice(-2)).toEqual(['stop live collab', 'Connect agent…'])
+        expect((await program(visitor)).slice(-1)).toEqual(['stop live collab'])
         expect(await visitor.evaluate(() => window.__hd4.online.canConnectAgent())).toBe(false)
 
         // The person's tab reloads: it took the session online, so it answers again.
@@ -314,10 +314,10 @@ test('connect agent walks the person through going online, copying the prompt an
     expect(await page.evaluate(() => Boolean(customElements.get('agent-connect-dialog'))),
         'The loaded handfish has no <agent-connect-dialog>.').toBe(true)
 
-    // Connect agent… sits right under Go online…, and the picker keeps its source.
+    // Connect agent… sits right under live collab..., and the picker keeps its source.
     const picker = '.hd4-monitor[data-channel="2"] .hd4-source-select'
     const program = await page.locator(`${picker} optgroup[label="Program"] option`).allTextContents()
-    expect(program.slice(-2)).toEqual(['Go online…', 'Connect agent…'])
+    expect(program.slice(-2)).toEqual(['live collab...', 'Connect agent…'])
     await page.selectOption(picker, 'agent')
     await expect(page.locator(picker)).toHaveValue('image')
     const dialog = page.locator('#agent-connect-dialog dialog')

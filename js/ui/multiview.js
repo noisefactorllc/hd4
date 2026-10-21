@@ -6,7 +6,7 @@
  * device), video/image files, a program pasted from the clipboard, and the
  * pattern/fill library. The picker reports the user's choice via
  * onSelectSource; the app applies it. With canGoOnline, the Program group
- * ends with Go online…, which opens online collaboration (Seance) for the
+ * ends with live collab..., which opens online collaboration (Seance) for the
  * channel programs, and with canConnectAgent, Connect agent… right under it;
  * like Paste program they are actions, not sources.
  */
@@ -49,11 +49,11 @@ export function buildMultiview(container, channels, {
         setStillAvailable(on) {
             tiles.forEach((t, i) => { t.setStillAvailable(on); t.syncSelect(channels[i].source) })
         },
-        /** Offer Connect agent… (under Go online…) or not. */
+        /** Offer Connect agent… (under live collab...) or not. */
         setConnectAgentAvailable(on) {
             tiles.forEach((t, i) => { t.setConnectAgentAvailable(on); t.syncSelect(channels[i].source) })
         },
-        /** Online, Go online… reads Go offline…: it opens the session, where Go Offline is. */
+        /** Online, live collab... reads stop live collab: it opens the session, where Go Offline is. */
         setOnline(on) {
             tiles.forEach((t) => t.setOnline(on))
         },
@@ -134,14 +134,14 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false, canConn
     pasteOption.value = 'paste'
     pasteOption.textContent = 'Paste program'
     programGroup.appendChild(pasteOption)
-    // Go online… (and Connect agent… under it) stay last in the group:
+    // live collab... (and Connect agent… under it) stay last in the group:
     // Custom is inserted before them.
     let onlineOption = null
     let agentOption = null
     if (canGoOnline) {
         onlineOption = document.createElement('option')
         onlineOption.value = 'online'
-        onlineOption.textContent = 'Go online…'
+        onlineOption.textContent = 'live collab...'
         programGroup.appendChild(onlineOption)
         if (canConnectAgent) {
             agentOption = document.createElement('option')
@@ -152,10 +152,10 @@ function buildSourcePicker(index, onSelectSource, { canGoOnline = false, canConn
     }
 
     function setOnline(on) {
-        if (onlineOption) onlineOption.textContent = on ? 'Go offline…' : 'Go online…'
+        if (onlineOption) onlineOption.textContent = on ? 'stop live collab' : 'live collab...'
     }
 
-    /** Offer Connect agent… right under Go online…, or take it away. */
+    /** Offer Connect agent… right under live collab..., or take it away. */
     function setConnectAgentAvailable(on) {
         if (!agentOption) return
         if (on && !agentOption.isConnected) onlineOption.after(agentOption)

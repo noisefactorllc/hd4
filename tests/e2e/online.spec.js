@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * Online collaboration: Go online… at the end of a channel picker's Program
+ * Online collaboration: live collab... at the end of a channel picker's Program
  * group opens the Seance dialog, Take Online shares the four channel
  * programs, and a second HD4 that opens the session link takes them over.
  * Cameras, video and image files stay local. Runs against a local Seance
@@ -25,7 +25,7 @@ async function open(page, path = '/') {
     await page.evaluate(() => window.HD4Agent.ready)
 }
 
-/** Choose Go online… in a channel's picker; the picker keeps showing the channel's source. */
+/** Choose live collab... in a channel's picker; the picker keeps showing the channel's source. */
 async function goOnlineFrom(page, channel) {
     const before = await page.locator(picker(channel)).inputValue()
     await page.selectOption(picker(channel), 'online')
@@ -33,10 +33,10 @@ async function goOnlineFrom(page, channel) {
     await expect(page.locator(picker(channel))).toHaveValue(before)
 }
 
-test('Go online… ends every picker\'s Program group, and nothing else changed on screen', async ({ page }) => {
+test('live collab... ends every picker\'s Program group, and nothing else changed on screen', async ({ page }) => {
     await open(page)
     // Connect agent… follows it when the loaded handfish has the connect-agent dialog.
-    const tail = await page.evaluate(() => customElements.get('agent-connect-dialog') ? ['Go online…', 'Connect agent…'] : ['Go online…'])
+    const tail = await page.evaluate(() => customElements.get('agent-connect-dialog') ? ['live collab...', 'Connect agent…'] : ['live collab...'])
     for (let n = 1; n <= 4; n++) {
         const program = await page.locator(`${picker(n)} optgroup[label="Program"] option`).allTextContents()
         expect(program.slice(-tail.length)).toEqual(tail)
@@ -74,11 +74,11 @@ test('Take Online shares the channel programs, and a second HD4 joins with the l
         // ... and empty documents (the host's camera and test card) are never applied.
         expect(await other.evaluate(() => window.__hd4.channels.map((c) => c.source.type))).toEqual(['camera', 'image', 'shader', 'shader'])
 
-        // Online, Go online… reads Go offline…. The joined HD4 does not offer
+        // Online, live collab... reads stop live collab. The joined HD4 does not offer
         // Connect agent…: no agent can be answered there.
         const offered = (p) => p.locator(`${picker(1)} optgroup[label="Program"] option`).allTextContents()
-        expect((await offered(other)).at(-1)).toBe('Go offline…')
-        expect((await offered(page)).slice(-2)).toEqual(['Go offline…', 'Connect agent…'])
+        expect((await offered(other)).at(-1)).toBe('stop live collab')
+        expect((await offered(page)).slice(-2)).toEqual(['stop live collab', 'Connect agent…'])
 
         // A change on the second HD4 reaches the first.
         await other.selectOption(picker(4), 'shader:Blue')
@@ -101,7 +101,7 @@ test('Take Online shares the channel programs, and a second HD4 joins with the l
     await expect(page.locator('seance-dialog')).toHaveAttribute('state', 'offline')
     expect(new URL(page.url()).searchParams.get('seance')).toBeNull()
     expect((await page.locator(`${picker(1)} optgroup[label="Program"] option`).allTextContents()).slice(-2))
-        .toEqual(['Go online…', 'Connect agent…'])
+        .toEqual(['live collab...', 'Connect agent…'])
     expect(errors).toEqual([])
 })
 
