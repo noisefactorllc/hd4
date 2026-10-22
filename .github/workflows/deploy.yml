@@ -19,6 +19,8 @@ on:
       - 'css/**'
       - 'js/**'
       - 'img/**'
+      - 'llms.txt'
+      - 'llms-full.txt'
       - '.github/workflows/deploy.yml'
 
 permissions: {}
