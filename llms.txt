@@ -29,8 +29,8 @@ person already has open: their channels, their monitors, their mix.
 1. Ask the person to open https://hd4.noisefactor.io, choose **Connect
    agent…** at the end of the Program group in any channel's source picker,
    click **Go Online**, then **Copy Prompt**, and paste the prompt to you. The
-   prompt names this file and the session link. (Without that dialog: **Go
-   online…** in the same place, **Take Online**, then send the link or the
+   prompt names this file and the session link. (Without that dialog: **live
+   collab...** in the same place, **Take Online**, then send the link or the
    six-character code.)
 2. Get the agent tool. It needs Node 22.4 or later and nothing else:
    `curl -fsSLO https://noisedeck.app/agent/seance-agent.mjs`
@@ -41,7 +41,7 @@ person already has open: their channels, their monitors, their mix.
 | Command | What it does |
 |---|---|
 | `node seance-agent.mjs commands` | Lists HD4's commands and their arguments. |
-| `node seance-agent.mjs look [--size N] [--format png\|jpg] [--out FILE]` | Saves an image of the program output. Prints its path. Open the file with your image tool. |
+| `node seance-agent.mjs look [--size N] [--format png\|jpg] [--out FILE]` | Saves an image of the program output. Its path is `result.envelope.result.image.path`; open the file with your image tool. |
 | `node seance-agent.mjs look --args '{"source":2}'` | Saves an image of channel 2 (`"preview"` is the PVW channel). |
 | `node seance-agent.mjs set <file> --args '{"channel":2}'` | Runs a program on channel 2 (setProgram). Without `--args` it goes to the PVW channel. `-` reads standard input. |
 | `node seance-agent.mjs validate <file>` | Checks a program without running it. |
@@ -49,11 +49,12 @@ person already has open: their channels, their monitors, their mix.
 | `node seance-agent.mjs call getProgram '{"channel":2}'` | Prints one channel's program in an envelope. |
 | `node seance-agent.mjs program --doc channel:2 [--json]` | Prints channel 2's document text. Without `--doc` it prints channel 1. |
 | `node seance-agent.mjs wait --doc channel:2 [--since REV] [--timeout S]` | Waits for the person to change channel 2's program, then prints it. |
-| `node seance-agent.mjs image-put <file>` | Adds a PNG, JPEG, GIF or WebP file to the session. Prints `image:<id>`. |
+| `node seance-agent.mjs image-put <file>` | Adds a PNG, JPEG, GIF or WebP file to the session. `result.ref` is its `image:<id>`. |
 | `node seance-agent.mjs transfer <from> <to> --to-args '{"channel":2}'` | Copies a program and its images from one joined session to another, here to HD4 channel 2. With HD4 as the source, `--from-args '{"channel":2}'` picks the channel. |
 | `node seance-agent.mjs leave` / `stop` | Leaves the session / stops the background process. |
 
-Every command prints JSON (`program` prints text). The exit code is 0 for
+Every command prints JSON, except `program` and `commands`, which print text
+(`--json` gives JSON). The exit code is 0 for
 success, 1 when HD4 refused the command (read `result.envelope.error.code`),
 and 2 when the tool could not run it (read `error.code`; the codes are listed
 below). `node seance-agent.mjs help` lists every option.
@@ -82,7 +83,8 @@ How it works, so you can explain it to the person:
   need the person at the browser: camera or microphone permission
   (`setCameraSource`, `setAudioInput`), a recording download (`setRecording`)
   and a pop-up window (`openViewport`). `commands` marks them. Suggest that the
-  person goes offline (**Go Offline** in the same dialog) when you are done.
+  person goes offline when you are done: **stop live collab** in a channel's
+  source picker opens the session dialog, which has **Go Offline**.
 - `look` asks the person's tab for an image of a monitor. The tab adds the
   image to the session as its own bytes, and the tool saves it as a file.
   `look` works only while every channel shows a program (a shader program or
@@ -90,6 +92,8 @@ How it works, so you can explain it to the person:
   channel shows a camera, a video, an image or a still, or still shows the
   last frame of one while its new program starts, or the KEY shows the still,
   `look` answers `REMOTE_UNAVAILABLE`: those stay on the person's computer.
+  `look` at the program output also answers it while the person's HD4 tab is
+  hidden, because a hidden tab does not draw the output.
   HD4 starts with a camera on channel 1 and the test card on channel 2, so ask
   the person to put programs or library sources on them first. Through a
   session, `getProgram` answers with the text the session holds, and a local
@@ -117,11 +121,21 @@ Agent tool errors (exit code 2, `error.code`):
 - `NO_APP_TAB`: the tab that took the session online did not answer. Ask the
   person to keep it open, or to go online again and send the new code.
 - `TIMEOUT`: the tab did not answer in time. Check `status`, then try again.
-- `READONLY`: the session lets this agent only read.
+- `READONLY`: the session lets this agent only read the program text:
+  `program`, `wait` and `status` work, and every app command, `commands` and
+  `look` included, is refused. Ask the person to allow guests to edit.
 - `SESSION_CLOSED`, `SESSION_REFUSED`: the connection closed, or the session
   server refused a request (the message says why).
 - `IMAGE_FAILED`, `NO_DOCUMENT`, `USAGE`, `INVALID_JSON`: an image transfer
   failed, a document is missing, or the command line was wrong.
+- `CONNECT_FAILED`, `RATE_LIMITED`: `join` could not reach the session server,
+  or the server is limiting joins from this address. Wait a minute, then join
+  again.
+- `INVALID_IMAGE`, `BAD_RESPONSE`: an image id is malformed, or the app sent
+  an answer that the tool could not read.
+- `DAEMON_FAILED`, `INTERNAL_ERROR`: the tool's background process did not
+  start, or the tool failed. If it happens again, run `stop` and join again.
+- A file that the tool cannot read gives the system's code, such as `ENOENT`.
 
 ## Control HD4 in a browser you drive
 
