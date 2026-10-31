@@ -138,3 +138,77 @@ test('KEY removes the key colour but keeps other colours', async ({ page }) => {
         return dist(prog, blue) // green removed → background Blue
     }, { timeout: 15_000 }).toBeLessThan(40)
 })
+
+const KEY_REGIONS = {
+    blue: [0.8, 0.45, 0.025, 0.025],
+    green: [0.425, 0.45, 0.025, 0.025],
+    white: [0.05, 0.45, 0.025, 0.025],
+    black: [0.925, 0.45, 0.025, 0.025],
+}
+
+async function keyRegion(page, name) {
+    return page.evaluate((rect) => window.__hd4.sampleProgramRect(...rect), KEY_REGIONS[name])
+}
+
+async function setupKeyPattern(page) {
+    const chooser = page.waitForEvent('filechooser')
+    await page.getByLabel('Channel 1 source', { exact: true }).selectOption('image')
+    await (await chooser).setFiles('img/testcard.png')
+    await page.getByLabel('Channel 3 source', { exact: true }).selectOption('shader:Color Bars')
+    await page.getByLabel('Take channel 1 to program', { exact: true }).click()
+    await page.waitForFunction(() => window.__hd4.channels[0].source.type === 'image')
+    await expect.poll(async () => {
+        const [program, source] = await page.evaluate(() => [window.__hd4.sampleProgramAvg(), window.__hd4.sampleChannelAvg(0)])
+        return dist(program, source)
+    }).toBeLessThan(10)
+    const background = {}
+    for (const name of Object.keys(KEY_REGIONS)) background[name] = await keyRegion(page, name)
+
+    // Verify the actual pattern against literal SMPTE colours before keying.
+    await page.getByLabel('Take channel 3 to program', { exact: true }).click()
+    for (const [name, rgb] of Object.entries({ blue: [0, 0, 255], green: [0, 255, 0], white: [255, 255, 255], black: [0, 0, 0] })) {
+        await expect.poll(async () => dist(await keyRegion(page, name), rgb)).toBeLessThan(12)
+        expect(dist(background[name], rgb)).toBeGreaterThan(80)
+    }
+    await page.getByLabel('Take channel 1 to program', { exact: true }).click()
+    await page.click('.hd4-comp-btn:has-text("KEY")')
+    await page.getByLabel('KEY source channel', { exact: true }).selectOption('3')
+    return background
+}
+
+test('KEY restores Blue after a Chroma → Luma → Chroma round trip', async ({ page }) => {
+    const background = await setupKeyPattern(page)
+    const colour = page.getByLabel('KEY colour', { exact: true })
+    const type = page.getByLabel('KEY type', { exact: true })
+    await colour.selectOption('blue')
+    await type.selectOption('luma')
+    await type.selectOption('chroma')
+    expect(await page.evaluate(() => window.__hd4.composition.key.chromaColor)).toBe('blue')
+    await expect(colour).toHaveValue('blue')
+    await expect.poll(async () => dist(await keyRegion(page, 'blue'), background.blue)).toBeLessThan(12)
+    await expect.poll(async () => dist(await keyRegion(page, 'green'), [0, 255, 0])).toBeLessThan(12)
+
+    await colour.selectOption('green')
+    expect(await page.evaluate(() => window.__hd4.composition.key.chromaColor)).toBe('green')
+    await expect.poll(async () => dist(await keyRegion(page, 'green'), background.green)).toBeLessThan(12)
+    await expect.poll(async () => dist(await keyRegion(page, 'blue'), [0, 0, 255])).toBeLessThan(12)
+})
+
+test('KEY restores Black after a Luma → Chroma → Luma round trip', async ({ page }) => {
+    const background = await setupKeyPattern(page)
+    const colour = page.getByLabel('KEY colour', { exact: true })
+    const type = page.getByLabel('KEY type', { exact: true })
+    await type.selectOption('luma')
+    await colour.selectOption('black')
+    await type.selectOption('chroma')
+    await type.selectOption('luma')
+    expect(await page.evaluate(() => window.__hd4.composition.key.lumaColor)).toBe('black')
+    await expect(colour).toHaveValue('black')
+    await expect.poll(async () => dist(await keyRegion(page, 'black'), background.black)).toBeLessThan(12)
+    await expect.poll(async () => dist(await keyRegion(page, 'white'), [255, 255, 255])).toBeLessThan(12)
+
+    await colour.selectOption('white')
+    expect(await page.evaluate(() => window.__hd4.composition.key.lumaColor)).toBe('white')
+    await expect.poll(async () => dist(await keyRegion(page, 'white'), background.white)).toBeLessThan(12)
+    await expect.poll(async () => dist(await keyRegion(page, 'black'), [0, 0, 0])).toBeLessThan(12)
+})

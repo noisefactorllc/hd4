@@ -309,7 +309,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         onToggleKey: () => { compositorState.toggleKey(); syncComposition() },
         onPinp: (p) => compositorState.setPinp(p),
         onSplit: (p) => compositorState.setSplit(p),
-        onKey: (p) => compositorState.setKey(p),
+        onKey: (p) => { compositorState.setKey(p); if ('type' in p) syncComposition() },
     })
     const syncComposition = () => compositionBar.setState(compositorState.snapshot())
     syncComposition()
