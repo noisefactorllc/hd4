@@ -48,8 +48,10 @@ export function buildCompositionBar(container, {
         setState(snap) {
             for (const [mode, b] of Object.entries(modeBtns)) {
                 b.classList.toggle('is-active', snap.composition === mode)
+                b.setAttribute('aria-pressed', String(snap.composition === mode))
             }
             keyBtn.classList.toggle('is-active', snap.key.on)
+            keyBtn.setAttribute('aria-pressed', String(!!snap.key.on))
             pinp.el.hidden = snap.composition !== 'pinp'
             split.el.hidden = snap.composition !== 'split'
             key.el.hidden = !snap.key.on

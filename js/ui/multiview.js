@@ -304,7 +304,7 @@ function buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude) {
     el.textContent = 'A'
     el.title = 'Include this channel in AUTO rotation'
     el.setAttribute('aria-label', `Channel ${index + 1} in AUTO rotation`)
-    const render = () => el.classList.toggle('is-on', included)
+    const render = () => { el.classList.toggle('is-on', included); el.setAttribute('aria-pressed', String(included)) }
     render()
     el.addEventListener('click', () => {
         included = !included

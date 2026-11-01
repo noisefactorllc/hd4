@@ -113,6 +113,7 @@ export function buildTransitionBar(container, {
     function applyType(value) {
         for (const [k, b] of Object.entries(typeBtns)) {
             b.classList.toggle('is-active', k === value)
+            b.setAttribute('aria-pressed', String(k === value))
         }
     }
     function applyTime(seconds) {

@@ -70,8 +70,8 @@ export function buildAutoBar(container, {
     return {
         el: bar,
         tempoBar: tempo,
-        setEnabled(on) { autoBtn.classList.toggle('is-active', !!on) },
-        setMatchAudio(on) { sync.classList.toggle('is-active', !!on) },
+        setEnabled(on) { autoBtn.classList.toggle('is-active', !!on); autoBtn.setAttribute('aria-pressed', String(!!on)) },
+        setMatchAudio(on) { sync.classList.toggle('is-active', !!on); sync.setAttribute('aria-pressed', String(!!on)) },
         /** Reflect a programmatic / audio-SYNC tempo onto the tempo-bar. */
         setBpm(v) { tempo.bpm = v },
         /** Reflect a mode / bars change made outside the bar (an agent command). */
@@ -89,6 +89,7 @@ function button(cls, text, title, onClick) {
     b.className = cls
     b.textContent = text
     b.title = title
+    b.setAttribute('aria-pressed', 'false')
     b.addEventListener('click', () => onClick?.())
     return b
 }

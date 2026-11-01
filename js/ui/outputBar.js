@@ -27,6 +27,8 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
 
     const freeze = toggleButton('FREEZE', onFreeze, 'Freeze the program output (key f)')
     const fade = toggleButton('FADE', onFade, 'Fade the program to black (key b)')
+    freeze.el.setAttribute('aria-pressed', 'false')
+    fade.el.setAttribute('aria-pressed', 'false')
     const still = toggleButton('STILL', () => {
         onStill?.()
         still.setActive(true)
@@ -59,6 +61,8 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
         setState({ freeze: f, faded } = {}) {
             freeze.setActive(f)
             fade.setActive(faded)
+            freeze.el.setAttribute('aria-pressed', String(!!f))
+            fade.el.setAttribute('aria-pressed', String(!!faded))
         },
         setVfx(name) { vfxSelect.value = name },
         setRecording(on, label) {

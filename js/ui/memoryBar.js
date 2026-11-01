@@ -17,6 +17,7 @@ export function buildMemoryBar(container, { slots = 8, onSave, onRecall } = {}) 
     saveBtn.type = 'button'
     saveBtn.className = 'hd4-mem-save'
     saveBtn.textContent = 'SAVE'
+    saveBtn.setAttribute('aria-pressed', 'false')
     saveBtn.setAttribute('aria-label', 'Arm save: the next memory slot click stores the current state')
 
     const slotsWrap = document.createElement('div')
@@ -31,6 +32,7 @@ export function buildMemoryBar(container, { slots = 8, onSave, onRecall } = {}) 
         b.dataset.slot = String(i)
         b.textContent = String(i)
         b.setAttribute('aria-label', `Memory ${i}`)
+        b.setAttribute('aria-description', 'Empty')
         b.addEventListener('click', () => {
             if (armed) { onSave?.(i); setArmed(false) }
             else onRecall?.(i)
@@ -44,6 +46,7 @@ export function buildMemoryBar(container, { slots = 8, onSave, onRecall } = {}) 
     function setArmed(on) {
         armed = !!on
         saveBtn.classList.toggle('is-active', armed)
+        saveBtn.setAttribute('aria-pressed', String(armed))
         wrap.classList.toggle('is-arming', armed)
     }
 
@@ -54,7 +57,11 @@ export function buildMemoryBar(container, { slots = 8, onSave, onRecall } = {}) 
         el: wrap,
         setOccupied(list) {
             const set = new Set(list)
-            slotBtns.forEach((b, idx) => b.classList.toggle('is-occupied', set.has(idx + 1)))
+            slotBtns.forEach((b, idx) => {
+                const occupied = set.has(idx + 1)
+                b.classList.toggle('is-occupied', occupied)
+                b.setAttribute('aria-description', occupied ? 'Saved' : 'Empty')
+            })
         },
         setArmed,
     }

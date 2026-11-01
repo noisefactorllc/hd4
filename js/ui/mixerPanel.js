@@ -66,6 +66,8 @@ function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource, onEd
     btns.className = 'hd4-strip-btns'
     const solo = stripButton('S', 'hd4-solo-btn', `Solo channel ${index + 1}`, () => onSolo?.(index))
     const mute = stripButton('M', 'hd4-mute-btn', `Mute channel ${index + 1}`, () => onMute?.(index))
+    solo.setAttribute('aria-pressed', 'false')
+    mute.setAttribute('aria-pressed', 'false')
     const edit = stripButton('EQ', 'hd4-edit-btn', `Channel ${index + 1} audio setup`, () => onEditStrip?.(index))
     btns.append(solo, mute, edit)
 
@@ -87,8 +89,8 @@ function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource, onEd
     return {
         el,
         setMeter(v) { fill.style.height = meterHeight(v) },
-        setMuted(on) { mute.classList.toggle('is-active', on) },
-        setSoloed(on) { solo.classList.toggle('is-active', on) },
+        setMuted(on) { mute.classList.toggle('is-active', on); mute.setAttribute('aria-pressed', String(!!on)) },
+        setSoloed(on) { solo.classList.toggle('is-active', on); solo.setAttribute('aria-pressed', String(!!on)) },
         setFader(pos) { range.value = String(pos) },
         setAudioInputs(list) { audio.updateDevices(list) },
         setAudioSource(mode, deviceId) { audio.show(mode, deviceId) },
@@ -193,9 +195,11 @@ function buildAuxModule({ onMonitor, onRecordSource }) {
     mon.textContent = 'MON'
     mon.title = 'Monitor (audition) the AUX bus on the speakers'
     mon.setAttribute('aria-label', 'Monitor the AUX bus')
+    const renderMonitor = () => { mon.classList.toggle('is-active', monitoring); mon.setAttribute('aria-pressed', String(monitoring)) }
+    renderMonitor()
     mon.addEventListener('click', () => {
         monitoring = !monitoring
-        mon.classList.toggle('is-active', monitoring)
+        renderMonitor()
         onMonitor?.(monitoring ? 'aux' : 'main')
     })
 
@@ -232,7 +236,7 @@ function buildAuxModule({ onMonitor, onRecordSource }) {
     return {
         el,
         setMeter(v) { fill.style.height = meterHeight(v) },
-        setMonitor(which) { monitoring = which === 'aux'; mon.classList.toggle('is-active', monitoring) },
+        setMonitor(which) { monitoring = which === 'aux'; renderMonitor() },
         setRecordSource(src) { toAux = src === 'aux'; renderRec() },
     }
 }
