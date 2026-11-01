@@ -557,7 +557,12 @@ async function bootInto({ container = null, audioContext = null, destination = n
     const mainBusEditor = buildMainBusEditor(app, {
         onParam: (key, value) => audio.setMainParam(key, value),
     })
-    const refreshAudioInputs = async () => { mixerPanel.setAudioInputs(await listAudioInputs()) }
+    let audioInputTurn = 0
+    const refreshAudioInputs = async () => {
+        const turn = ++audioInputTurn
+        const inputs = await listAudioInputs()
+        if (turn === audioInputTurn) mixerPanel.setAudioInputs(inputs)
+    }
     if (navigator.mediaDevices?.addEventListener) {
         navigator.mediaDevices.addEventListener('devicechange', refreshAudioInputs)
     }
@@ -568,13 +573,21 @@ async function bootInto({ container = null, audioContext = null, destination = n
     // URL text. Move the bytes to IndexedDB, which frees localStorage.
     // Non-blocking; saves wait for it.
     migrateMemoryStills(memory).catch((e) => console.error('[hd4] could not move memory stills', e))
-    const modules = { channels: state.channels, switcher, output, compositor: compositorState, audio, renderers: state.renderers, preview: previewBus }
+    const modules = {
+        channels: state.channels, switcher, output, compositor: compositorState, audio, renderers: state.renderers, preview: previewBus,
+        programCompositor: compositor, autoMix,
+        recording: { get source() { return recordSource }, set source(src) { recordSource = src } },
+    }
     state.memory = memory
     const refreshAfterRecall = () => {
         multiview.refresh() // re-reads each tile's fit toggle from its renderer
         refreshStillAvailable() // the recalled slots may name a stored still
         transitionBar.setType(switcher.type)
         transitionBar.setTime(switcher.time)
+        transitionBar.setCurve(compositor.curve)
+        transitionBar.setBlend(compositor.blend)
+        autoBar.setMode(autoMix.mode)
+        autoBar.setBars(autoMix.barsPerSwitch)
         outputBar.setVfx(output.vfx)
         previewView.setPreview(previewBus.preview)
         syncComposition()
@@ -582,8 +595,11 @@ async function bootInto({ container = null, audioContext = null, destination = n
             mixerPanel.setFader(i, audio.faderOf(i))
             mixerPanel.setMuted(i, audio.isMuted(i))
             mixerPanel.setSoloed(i, audio.isSoloed(i))
+            mixerPanel.setAudioSource(i, audio.channelAudioMode(i), audio.channelAudioDeviceId(i))
         }
         mixerPanel.setMainFader(audio.mainFader())
+        mixerPanel.setMonitor(audio.monitorSource())
+        mixerPanel.setRecordSource(recordSource)
         if (stripEditor.isOpen) stripEditor.update(audio.stripParams(stripEditor.channel))
         if (mainBusEditor.isOpen) mainBusEditor.update(audio.mainParams())
     }
@@ -593,13 +609,20 @@ async function bootInto({ container = null, audioContext = null, destination = n
         // On a full localStorage there is room only once older slots' stills
         // have moved out.
         await memoryStillsMigrated()
+        memoryBar.setSaveFailure(null)
         try {
             await memory.saveWithStills(slot, snapshot, storeEmbeddedStills)
         } catch (e) {
             console.error(`[hd4] memory ${slot} was not saved`, e)
+            showParam('MEM', 'FAILED')
+            memoryBar.setSaveFailure(slot)
             return false
         }
         memoryBar.setOccupied(memory.list())
+        if (activeControl?.label === 'MEM' && activeControl.value === 'FAILED') {
+            activeControl = null
+            refreshOled()
+        }
         return true
     }
     // Saves finish in click order, and a recall waits for a save still being
@@ -618,7 +641,10 @@ async function bootInto({ container = null, audioContext = null, destination = n
             refreshAfterRecall()
             // A recalled source that cannot start falls back on its channel
             // afterwards; re-sync the pickers once every source has settled.
-            return settled.then(() => multiview.refresh())
+            return settled.then(async () => {
+                await refreshAudioInputs()
+                refreshAfterRecall()
+            })
         }
         if (saving) return saving.then(recall)
         return recall()

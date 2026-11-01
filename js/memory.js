@@ -178,7 +178,7 @@ export function slotStillIds(memory) {
     return ids
 }
 
-export function captureSnapshot({ channels, switcher, output, compositor, audio, renderers, preview }) {
+export function captureSnapshot({ channels, switcher, output, compositor, audio, renderers, preview, programCompositor, autoMix, recording }) {
     return {
         version: 1,
         channels: channels.map((c) => c.serialize()),
@@ -189,15 +189,20 @@ export function captureSnapshot({ channels, switcher, output, compositor, audio,
         preview: preview?.preview,
         switcher: { live: switcher.live, type: switcher.type, time: switcher.time },
         output: { vfx: output.vfx },
+        ...(programCompositor ? { transition: { curve: programCompositor.curve, blend: programCompositor.blend } } : {}),
+        ...(autoMix ? { auto: { mode: autoMix.mode, bars: autoMix.barsPerSwitch } } : {}),
+        ...(recording ? { recordSource: recording.source } : {}),
         composition: compositor ? compositor.snapshot() : undefined,
         audio: {
             channels: channels.map((_, i) => ({
                 fader: audio.faderOf(i),
                 muted: audio.isMuted(i),
                 soloed: audio.isSoloed(i),
+                ...(audio.channelAudioMode ? { mode: audio.channelAudioMode(i), deviceId: audio.channelAudioDeviceId?.(i) || '' } : {}),
                 ...(audio.stripParams ? { strip: audio.stripParams(i) } : {}),
             })),
             main: audio.mainFader(),
+            ...(audio.monitorSource ? { monitor: audio.monitorSource() } : {}),
             ...(audio.mainParams ? { mainBus: audio.mainParams() } : {}),
         },
     }
@@ -207,7 +212,7 @@ export function captureSnapshot({ channels, switcher, output, compositor, audio,
  * Apply a snapshot to the live modules. Returns a promise that resolves once
  * every recalled channel source has started or fallen back; it never rejects.
  */
-export function applySnapshot(snap, { channels, switcher, output, compositor, audio, renderers, preview }) {
+export function applySnapshot(snap, { channels, switcher, output, compositor, audio, renderers, preview, programCompositor, autoMix, recording }) {
     if (!snap) return Promise.resolve()
     const restores = []
     if (Array.isArray(snap.channels)) {
@@ -232,6 +237,15 @@ export function applySnapshot(snap, { channels, switcher, output, compositor, au
         switcher.setTime(snap.switcher.time)
         switcher.cut(snap.switcher.live)
     }
+    if (snap.transition && programCompositor) {
+        if (typeof snap.transition.curve === 'string') programCompositor.setCurve(snap.transition.curve)
+        if (typeof snap.transition.blend === 'string') programCompositor.setBlend(snap.transition.blend)
+    }
+    if (snap.auto && autoMix) {
+        if (typeof snap.auto.mode === 'string') autoMix.setMode(snap.auto.mode)
+        if (typeof snap.auto.bars === 'number') autoMix.setBarsPerSwitch(snap.auto.bars)
+    }
+    if (recording && (snap.recordSource === 'program' || snap.recordSource === 'aux')) recording.source = snap.recordSource
     if (snap.output && output) {
         output.setVfx(snap.output.vfx || 'none')
     }
@@ -243,10 +257,16 @@ export function applySnapshot(snap, { channels, switcher, output, compositor, au
                 audio.setMute(i, !!s.muted)
                 audio.setSolo(i, !!s.soloed)
                 if (s.strip && audio.setStripParams) audio.setStripParams(i, s.strip)
+                if (['follow', 'none', 'device'].includes(s.mode) && audio.setChannelAudioMode) {
+                    const deviceId = s.deviceId ?? audio.channelAudioDeviceId?.(i) ?? ''
+                    restores.push(Promise.resolve(audio.setChannelAudioMode(i, s.mode, deviceId))
+                        .catch((e) => console.warn(`[hd4] channel ${i + 1} source was not recalled`, e)))
+                }
             })
         }
         if (typeof snap.audio.main === 'number') audio.setMainFader(snap.audio.main)
         if (snap.audio.mainBus && audio.setMainParams) audio.setMainParams(snap.audio.mainBus)
+        if (typeof snap.audio.monitor === 'string' && audio.setMonitor) audio.setMonitor(snap.audio.monitor)
     }
     return Promise.all(restores)
 }

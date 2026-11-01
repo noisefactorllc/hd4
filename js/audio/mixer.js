@@ -44,6 +44,7 @@ export class AudioMixer {
             followSource: null, // audio from the channel's video media
             deviceSource: null, // an independently-selected input device
             deviceStream: null,
+            deviceTurn: 0,
             activeSource: null, // whichever is currently wired to the chain
             // Channel-strip processing: HPF → 3-band EQ → gate →
             // comp → makeup → delay → pan → fader, plus AUX/REV sends.
@@ -139,17 +140,24 @@ export class AudioMixer {
         const strip = this._strips[index]
         this.ensureContext()
         this._clearDevice(strip)
+        const turn = strip.deviceTurn
         strip.audioMode = mode
         strip.deviceId = mode === 'device' ? deviceId : ''
         if (mode === 'device') {
             await this.resume()
+            if (turn !== strip.deviceTurn) return
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: deviceId ? { deviceId: { exact: deviceId } } : true,
                 })
+                if (turn !== strip.deviceTurn) {
+                    for (const track of stream.getTracks()) { try { track.stop() } catch { /* ignore */ } }
+                    return
+                }
                 strip.deviceStream = stream
                 strip.deviceSource = this._ctx.createMediaStreamSource(stream)
             } catch {
+                if (turn !== strip.deviceTurn) return
                 strip.audioMode = 'none'
             }
         }
@@ -167,6 +175,7 @@ export class AudioMixer {
     }
 
     _clearDevice(strip) {
+        strip.deviceTurn++
         if (strip.deviceSource) {
             try { strip.deviceSource.disconnect() } catch { /* ignore */ }
             if (strip.activeSource === strip.deviceSource) strip.activeSource = null

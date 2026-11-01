@@ -16,6 +16,7 @@ import {
     slotStillIds,
 } from '../../js/memory.js'
 import { PreviewBus } from '../../js/previewBus.js'
+import { AutoMix } from '../../js/autoMix.js'
 
 function fakeStorage() {
     const m = new Map()
@@ -442,4 +443,114 @@ test('slotStillIds skips a slot it cannot read', () => {
     storage.setItem('hd4.memory.1', '{not json')
     storage.setItem('hd4.memory.3', JSON.stringify({ version: 1, channels: [{ type: 'image', name: 'Still', stillId: STILL_ID }] }))
     assert.deepEqual(slotStillIds(new MemoryStore(storage)), [STILL_ID])
+})
+
+
+test('captureSnapshot saves the existing transition, audio-source, AUTO and routing settings', () => {
+    const modules = sampleModulesForCapture()
+    modules.programCompositor = { curve: 'sharp', blend: 'screen' }
+    modules.autoMix = new AutoMix({ mode: 'random', barsPerSwitch: 8 })
+    modules.recording = { source: 'aux' }
+    Object.assign(modules.output, { freeze: true, faded: true })
+    Object.assign(modules.audio, {
+        channelAudioMode: (i) => ['none', 'device'][i],
+        channelAudioDeviceId: (i) => ['', 'input-2'][i],
+        monitorSource: () => 'aux',
+    })
+    const snap = captureSnapshot(modules)
+    assert.deepEqual(snap.transition, { curve: 'sharp', blend: 'screen' })
+    assert.deepEqual(snap.auto, { mode: 'random', bars: 8 })
+    assert.equal(snap.recordSource, 'aux')
+    assert.equal(snap.audio.monitor, 'aux')
+    assert.deepEqual(snap.audio.channels.map(({ mode, deviceId }) => ({ mode, deviceId })), [
+        { mode: 'none', deviceId: '' },
+        { mode: 'device', deviceId: 'input-2' },
+    ])
+    assert.deepEqual(snap.output, { vfx: 'mono' })
+})
+
+test('applySnapshot restores scene settings and waits for audio-source fallback to settle', async () => {
+    const programCompositor = { curve: 'linear', blend: 'add', setCurve(v) { this.curve = v }, setBlend(v) { this.blend = v } }
+    const autoMix = new AutoMix({ mode: 'scan', barsPerSwitch: 2 })
+    const recording = { source: 'program' }
+    const sources = [{ mode: 'follow', deviceId: '' }, { mode: 'follow', deviceId: '' }]
+    let monitor = 'main'
+    let finishDevice
+    const device = new Promise((resolve) => { finishDevice = resolve })
+    const modules = {
+        programCompositor, autoMix, recording,
+        audio: {
+            setFader() {}, setMute() {}, setSolo() {},
+            setMonitor(v) { monitor = v },
+            async setChannelAudioMode(i, mode, deviceId) {
+                if (mode === 'device') {
+                    await device
+                    sources[i] = { mode: 'none', deviceId }
+                } else sources[i] = { mode, deviceId }
+            },
+        },
+    }
+    const done = applySnapshot({
+        transition: { curve: 'sharp', blend: 'screen' },
+        auto: { mode: 'random', bars: 8 },
+        recordSource: 'aux',
+        audio: { monitor: 'aux', channels: [
+            { fader: 0.5, mode: 'none', deviceId: '' },
+            { fader: 0.6, mode: 'device', deviceId: 'unavailable-input' },
+        ] },
+    }, modules)
+    assert.equal(programCompositor.curve, 'sharp')
+    assert.equal(programCompositor.blend, 'screen')
+    assert.equal(autoMix.mode, 'random')
+    assert.equal(autoMix.barsPerSwitch, 8)
+    assert.equal(monitor, 'aux')
+    assert.equal(recording.source, 'aux')
+    let settled = false
+    done.then(() => { settled = true })
+    await null
+    assert.equal(settled, false)
+    finishDevice()
+    await done
+    assert.deepEqual(sources, [{ mode: 'none', deviceId: '' }, { mode: 'none', deviceId: 'unavailable-input' }])
+})
+
+test('legacy snapshots leave every missing scene setting at its current value', async () => {
+    const programCompositor = { curve: 'sharp', blend: 'screen', setCurve() { assert.fail('missing curve') }, setBlend() { assert.fail('missing blend') } }
+    const autoMix = new AutoMix({ mode: 'random', barsPerSwitch: 8 })
+    const recording = { source: 'aux' }
+    const audio = {
+        setFader() {}, setMute() {}, setSolo() {},
+        setMonitor() { assert.fail('missing monitor') },
+        setChannelAudioMode() { assert.fail('missing audio mode') },
+    }
+    await applySnapshot({ version: 1, audio: { channels: [{ fader: 0.5 }] } }, { programCompositor, autoMix, recording, audio })
+    assert.equal(programCompositor.curve, 'sharp')
+    assert.equal(programCompositor.blend, 'screen')
+    assert.equal(autoMix.mode, 'random')
+    assert.equal(autoMix.barsPerSwitch, 8)
+    assert.equal(recording.source, 'aux')
+})
+
+test('partial scene settings preserve absent fields while applying present values', async () => {
+    const programCompositor = { curve: 'sharp', blend: 'screen', setCurve(v) { this.curve = v }, setBlend() { assert.fail('missing blend') } }
+    const autoMix = new AutoMix({ mode: 'random', barsPerSwitch: 8 })
+    await applySnapshot({ transition: { curve: 'linear' }, auto: { mode: 'scan' } }, { programCompositor, autoMix })
+    assert.equal(programCompositor.curve, 'linear')
+    assert.equal(programCompositor.blend, 'screen')
+    assert.equal(autoMix.mode, 'scan')
+    assert.equal(autoMix.barsPerSwitch, 8)
+})
+
+test('refused storage writes reach the save caller and preserve the previous slot', async () => {
+    const storage = fakeStorage()
+    const memory = new MemoryStore(storage)
+    const previous = { version: 1, switcher: { live: 2 } }
+    memory.save(3, previous)
+    const error = new Error('QuotaExceededError')
+    storage.setItem = () => { throw error }
+    assert.throws(() => memory.save(3, { version: 1, switcher: { live: 4 } }), (e) => e === error)
+    await assert.rejects(memory.saveWithStills(3, { version: 1 }, storesStill), (e) => e === error)
+    assert.deepEqual(memory.load(3), previous)
+    assert.throws(() => memory.save(4, { version: 1 }), (e) => e === error)
+    assert.equal(memory.has(4), false)
 })

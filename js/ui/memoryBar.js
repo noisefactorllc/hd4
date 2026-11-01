@@ -23,6 +23,12 @@ export function buildMemoryBar(container, { slots = 8, onSave, onRecall } = {}) 
     const slotsWrap = document.createElement('div')
     slotsWrap.className = 'hd4-mem-slots'
 
+    const status = document.createElement('span')
+    status.className = 'hd4-mem-status'
+    status.setAttribute('role', 'status')
+    status.setAttribute('aria-live', 'polite')
+    status.setAttribute('aria-atomic', 'true')
+
     let armed = false
     const slotBtns = []
     for (let i = 1; i <= slots; i++) {
@@ -50,7 +56,7 @@ export function buildMemoryBar(container, { slots = 8, onSave, onRecall } = {}) 
         wrap.classList.toggle('is-arming', armed)
     }
 
-    wrap.append(label, saveBtn, slotsWrap)
+    wrap.append(label, saveBtn, slotsWrap, status)
     container.appendChild(wrap)
 
     return {
@@ -63,6 +69,7 @@ export function buildMemoryBar(container, { slots = 8, onSave, onRecall } = {}) 
                 b.setAttribute('aria-description', occupied ? 'Saved' : 'Empty')
             })
         },
+        setSaveFailure(slot) { status.textContent = slot == null ? '' : `memory ${slot} was not saved` },
         setArmed,
     }
 }
