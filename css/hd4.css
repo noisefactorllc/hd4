@@ -228,6 +228,11 @@ body {
     border-color: var(--hf-red);
     font-variant-numeric: tabular-nums;
 }
+.hd4-rec-status:not(:empty) {
+    max-width: 18rem;
+    color: var(--hf-text-normal);
+    font-size: var(--hf-size-xs);
+}
 
 .hd4-vfx-select {
     font-family: var(--hf-font-family);

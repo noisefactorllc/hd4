@@ -40,7 +40,8 @@ import { AudioMixer } from './audio/mixer.js'
 import { MemoryStore, captureSnapshot, applySnapshot, slotStillIds } from './memory.js'
 import { StillStore } from './still.js'
 import { getStill, memoryStillsMigrated, migrateMemoryStills, storeEmbeddedStills } from './stillStorage.js'
-import { Recorder, recordingFilename } from './recorder.js'
+import { Recorder } from './recorder.js'
+import { recoverableTakes, readTake, removeTake } from './recordingStorage.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
@@ -176,7 +177,10 @@ async function bootInto({ container = null, audioContext = null, destination = n
     state.compositorState = compositorState
     const stillStore = new StillStore()
     state.still = stillStore
-    const recorder = new Recorder()
+    const recorder = new Recorder({ onError: (error) => {
+        outputBar.setRecordingError(`Recording stopped: ${error.message}. Keep the downloaded take.`)
+        void finishRecording(false)
+    } })
     state.recorder = recorder
 
     // --- Top bar: HD4 logotype + master output controls. The industrial
@@ -186,6 +190,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
     const topbar = byId('hd4-topbar')
     topbar.classList.add('hf-topbar')
     const outputBar = buildOutputBar(topbar, {
+        onRecoverTake: (take) => recoverTake(take),
+        onRemoveTake: (take) => discardTake(take),
         onFreeze: () => { output.toggleFreeze(); showParam('FREEZE', output.freeze ? 'ON' : 'OFF') },
         onFade: () => { output.toggleFade(now()); showParam('FADE', output.faded ? 'ON' : 'OFF') },
         onVfx: (name) => { output.setVfx(name); showParam('VFX', String(name).toUpperCase()) },
@@ -296,6 +302,9 @@ async function bootInto({ container = null, audioContext = null, destination = n
         programOutput.close()
     }
     const onPageHide = (event) => {
+        // Best effort only: the committed checkpoints already exist before
+        // navigation. The browser may not run the final data event here.
+        if (recorder.recording) void recorder.stop().then(() => outputBar.setRecording(false))
         if (event.persisted) return
         window.removeEventListener('pagehide', onPageHide)
         disposeOutputs()
@@ -521,17 +530,55 @@ async function bootInto({ container = null, audioContext = null, destination = n
         } catch (e) { console.warn('[hd4] recording without audio', e?.message || e) }
         return stream
     }
-    const toggleRecording = async () => {
-        if (recorder.recording) {
+    const refreshRecoveredTakes = async () => {
+        try { outputBar.setRecovery((await recoverableTakes())[0] || null) }
+        catch { outputBar.setRecordingError('Saved takes could not be read from this browser.') }
+    }
+    const recoverTake = async (take) => {
+        if (!take) return
+        try {
+            const blob = await readTake(take)
+            if (blob?.size) downloadBlob(blob, take.filename)
+            await refreshRecoveredTakes()
+        } catch { outputBar.setRecordingError('The saved take could not be read. It has not been removed.') }
+    }
+    const discardTake = async (take) => {
+        if (!take) return
+        try { await removeTake(take.id); await refreshRecoveredTakes() }
+        catch { outputBar.setRecordingError('The saved take could not be removed.') }
+    }
+    let finishingRecording = null
+    function finishRecording(removeSaved = true) {
+        if (finishingRecording) return finishingRecording
+        finishingRecording = (async () => {
             const out = await recorder.stop()
             outputBar.setRecording(false)
-            if (out && out.blob.size > 0) downloadBlob(out.blob, recordingFilename(new Date(), out.type))
+            if (out?.blob.size > 0) downloadBlob(out.blob, out.filename)
             state.lastRecording = out ? { size: out.blob.size, type: out.type } : null
-            return
-        }
-        await audio.resume()
-        if (recorder.start(buildRecordStream(), { now: now() })) outputBar.setRecording(true)
+            if (out && removeSaved && !recorder.storageError) await removeTake(out.id)
+            await refreshRecoveredTakes()
+        })().catch(() => {
+            outputBar.setRecordingError('The take could not be saved. Keep this tab open.')
+        }).finally(() => { finishingRecording = null })
+        return finishingRecording
     }
+    let recordingAction = false
+    const toggleRecording = async () => {
+        if (recordingAction) return
+        recordingAction = true
+        try {
+            if (recorder.recording) { await finishRecording(); return }
+            outputBar.setRecordingError()
+            await audio.resume()
+            if (await recorder.start(buildRecordStream(), { now: now() })) outputBar.setRecording(true)
+        } catch (error) {
+            outputBar.setRecordingError(`Recording could not start: ${error.message}`)
+        } finally {
+            recordingAction = false
+        }
+    }
+    void refreshRecoveredTakes()
+    window.addEventListener('focus', refreshRecoveredTakes)
 
     // --- Audio mixer panel (channel strips + main) ---
     const mixerPanel = buildMixerPanel(byId('hd4-mixer'), {
@@ -1204,6 +1251,8 @@ async function bootInto({ container = null, audioContext = null, destination = n
         stop() {
             if (_rafId != null) { cancelAnimationFrame(_rafId); _rafId = null }
             window.removeEventListener('pagehide', onPageHide)
+            window.removeEventListener('focus', refreshRecoveredTakes)
+            if (recorder.recording) void recorder.stop()
             detachProgramPaste()
             try { disposeOutputs() } catch (e) { console.warn('[hd4] output teardown', e?.message || e) }
             beatClock.stop()
