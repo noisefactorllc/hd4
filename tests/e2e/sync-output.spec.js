@@ -223,10 +223,13 @@ test('SYNC OUT pairs, publishes SDK-framed program pixels, and disposes on pageh
     await expect(page.locator('#sync-output-name')).toHaveValue('HD4')
     await expect(page.locator('#sync-output-state')).toHaveText('Ready')
     await expect(page.locator('#sync-output-action')).toHaveText('Connect Sync')
+    await expect(page.locator('#sync-output-action > .sync-mark')).toHaveCount(1)
 
     await page.click('#sync-output-action')
     await expect(page.locator('#sync-output-state')).toHaveText('Connected')
     await expect(page.locator('#sync-output-provider')).toHaveText('NDI, Spout')
+    await expect(page.locator('#sync-output-action')).toHaveText('Start sending')
+    await expect(page.locator('#sync-output-action > .sync-mark')).toHaveCount(1)
 
     const syncOut = page.locator('#sync-output-open')
     await expect(syncOut).not.toHaveClass(/is-active/)
@@ -235,7 +238,10 @@ test('SYNC OUT pairs, publishes SDK-framed program pixels, and disposes on pageh
     await expect(page.locator('#sync-output-state')).toHaveText('Sending')
     await expect(page.locator('#sync-output-live')).toBeVisible()
     await expect(page.locator('#sync-output-format')).toHaveText('1280×720 · 60 fps')
+    await expect(page.locator('#sync-output-action')).toHaveText('Stop sending')
+    await expect(page.locator('#sync-output-action > .sync-mark')).toHaveCount(1)
     await expect(syncOut).toHaveClass(/is-active/)
+    await expect(syncOut.locator(':scope > .sync-mark')).toHaveCount(1)
     await page.waitForFunction(() => window.__hd4SyncTest.frames.length >= 2)
 
     const transport = await page.evaluate(() => ({

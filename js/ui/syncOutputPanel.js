@@ -41,7 +41,7 @@ const MARKUP = `
             <p id="sync-output-connect-notice" hidden>Your browser may request loopback access. Sync will separately ask whether this exact origin may pair.</p>
             <p id="sync-output-status">Sync is not connected.</p>
         </div>
-        <button type="button" id="sync-output-action" class="sync-output-action">Check again</button>
+        <button type="button" id="sync-output-action" class="sync-output-action"><span class="sync-mark" aria-hidden="true"></span><span id="sync-output-action-label">Check again</span></button>
     </div>
 </dialog>`
 

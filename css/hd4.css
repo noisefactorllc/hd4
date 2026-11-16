@@ -1527,6 +1527,35 @@ body {
 }
 .sync-output-action:disabled { cursor: wait; opacity: 0.55; }
 
+/* The official Sync mark before the label on every button that connects to
+   Sync. The glyph is a mask, so it takes the button's own text colour in
+   every theme and state. */
+.sync-mark {
+    display: inline-block;
+    flex: none;
+    width: 1.2em;
+    height: 1.2em;
+    vertical-align: middle;
+    background-color: currentColor;
+    -webkit-mask: url(sync-mark.svg) center / contain no-repeat;
+    mask: url(sync-mark.svg) center / contain no-repeat;
+}
+#sync-output-open,
+.sync-output-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35em;
+}
+/* Forced colours repaint backgrounds as the page colour, which would hide the
+   mark: draw it in the system button text colour instead. */
+@media (forced-colors: active) {
+    .sync-mark {
+        forced-color-adjust: none;
+        background-color: ButtonText;
+    }
+}
+
 @media (max-width: 620px) {
     .sync-output-meta,
     .sync-output-counters { grid-template-columns: repeat(2, minmax(0, 1fr)); }

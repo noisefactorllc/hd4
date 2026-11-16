@@ -68,6 +68,11 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
     const syncOut = toggleButton('SYNC OUT', null, 'Send the program to Noisedeck Sync')
     syncOut.el.id = 'sync-output-open'
     syncOut.el.setAttribute('aria-haspopup', 'dialog')
+    // The official Sync mark before the label (styled in css/hd4.css).
+    const syncMark = document.createElement('span')
+    syncMark.className = 'sync-mark'
+    syncMark.setAttribute('aria-hidden', 'true')
+    syncOut.el.prepend(syncMark)
     const viewport = toggleButton('VIEWPORT', onViewport, 'Open the program in a window for a secondary display (close that window to detach)')
 
     group.append(freeze.el, fade.el, still.el, record.el, recover.el, remove.el, recordStatus, vfxSelect, syncOut.el, viewport.el)
