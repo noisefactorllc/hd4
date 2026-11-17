@@ -6,6 +6,7 @@
  */
 import { CURVE_ORDER } from '../curves.js'
 import { BLEND_MODES, BLEND_LABELS } from '../blend.js'
+import { setTooltip } from './tooltip.js'
 
 export function buildTransitionBar(container, {
     onType,
@@ -36,7 +37,7 @@ export function buildTransitionBar(container, {
         b.className = 'hd4-trans-btn'
         b.dataset.type = value
         b.textContent = label
-        b.title = `${label} transition (key ${typeKeys[value]})`
+        setTooltip(b, `${label} transition (key ${typeKeys[value]})`)
         b.addEventListener('click', () => { onType?.(value); applyType(value) })
         typeGroup.appendChild(b)
         typeBtns[value] = b

@@ -7,6 +7,7 @@
  */
 import { MIDI_TARGETS } from '../midi.js'
 import { registerEscapeable, unregisterEscapeable } from 'handfish'
+import { setTooltip } from './tooltip.js'
 
 export function buildMidiPanel(container, { onEnable, onLearn, onClear } = {}) {
     const rows = new Map() // target id → { sigEl, learnBtn }
@@ -46,7 +47,7 @@ export function buildMidiPanel(container, { onEnable, onLearn, onClear } = {}) {
         learn.addEventListener('click', () => onLearn?.(t))
         const clr = document.createElement('button')
         clr.type = 'button'; clr.className = 'hd4-midi-clear'; clr.textContent = '✕'
-        clr.title = 'Clear binding'
+        setTooltip(clr, 'Clear binding')
         clr.addEventListener('click', () => onClear?.(t))
         row.append(lab, sig, learn, clr)
         list.appendChild(row)

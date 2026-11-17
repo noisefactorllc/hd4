@@ -12,6 +12,7 @@
  */
 import { SOURCE_LIBRARY, presetByDsl } from '../sources/presets.js'
 import { isStillId, sourceKind } from '../sources/sourceModel.js'
+import { setTooltip } from './tooltip.js'
 
 export function buildMultiview(container, channels, {
     onSelectSource, onSetFit, getFit, onSetAutoInclude, getAutoInclude, cameras = [], canGoOnline = false,
@@ -80,7 +81,7 @@ function buildTile(channel, index, { onSelectSource, canGoOnline, canConnectAgen
     const label = document.createElement('span')
     label.className = 'hd4-monitor-label'
     label.textContent = channel.label
-    label.title = channel.label
+    setTooltip(label, channel.label)
 
     const auto = buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude)
     const fit = buildFitToggle(index, onSetFit, initialFit)
@@ -92,7 +93,7 @@ function buildTile(channel, index, { onSelectSource, canGoOnline, canConnectAgen
 
     return {
         el,
-        setLabel(text) { label.textContent = text; label.title = text },
+        setLabel(text) { label.textContent = text; setTooltip(label, text) },
         syncSelect(source) { picker.sync(source) },
         setFitVisible(on) { fit.el.style.display = on ? '' : 'none' },
         updateFit(mode) { fit.update(mode) },
@@ -292,7 +293,7 @@ export function setSelectValue(select, source) {
         select.selectedIndex = -1
     }
     // The picker is width-constrained; surface the full choice on hover.
-    select.title = select.selectedOptions[0]?.textContent || ''
+    setTooltip(select, select.selectedOptions[0]?.textContent || '')
 }
 
 /** Toggle whether this channel takes part in AUTO (beat-synced) rotation. */
@@ -302,7 +303,7 @@ function buildAutoIncludeToggle(index, initialInclude, onSetAutoInclude) {
     el.type = 'button'
     el.className = 'hd4-auto-include'
     el.textContent = 'A'
-    el.title = 'Include this channel in AUTO rotation'
+    setTooltip(el, 'Include this channel in AUTO rotation')
     el.setAttribute('aria-label', `Channel ${index + 1} in AUTO rotation`)
     const render = () => { el.classList.toggle('is-on', included); el.setAttribute('aria-pressed', String(included)) }
     render()
@@ -324,7 +325,7 @@ function buildFitToggle(index, onSetFit, initialMode = 'cover') {
     const el = document.createElement('button')
     el.type = 'button'
     el.className = 'hd4-fit-btn'
-    el.title = 'Fit: zoom/crop vs scale-to-fit'
+    setTooltip(el, 'Fit: zoom/crop vs scale-to-fit')
     el.setAttribute('aria-label', `Channel ${index + 1} fit mode`)
     const render = () => { el.textContent = mode === 'cover' ? 'Crop' : 'Scale' }
     render()

@@ -13,6 +13,7 @@
  * so the app re-tempos the BeatClock; the app pushes BPM back (setBpm) when the
  * clock changes programmatically or the audio SYNC re-anchors it.
  */
+import { setTooltip } from './tooltip.js'
 const MODES = [
     ['scan', 'Scan'],
     ['random', 'Random'],
@@ -59,7 +60,7 @@ export function buildAutoBar(container, {
     bars.value = String(initialBars)
     bars.className = 'hd4-auto-bars hf-number'
     bars.setAttribute('aria-label', 'Bars per switch')
-    bars.title = 'Bars per switch'
+    setTooltip(bars, 'Bars per switch')
     bars.addEventListener('change', () => onBars?.(parseInt(bars.value, 10) || 1))
 
     const sync = button('hd4-auto-sync', 'SYNC', 'Match the tempo to the audio', () => onMatchAudio?.())
@@ -88,7 +89,7 @@ function button(cls, text, title, onClick) {
     b.type = 'button'
     b.className = cls
     b.textContent = text
-    b.title = title
+    setTooltip(b, title)
     b.setAttribute('aria-pressed', 'false')
     b.addEventListener('click', () => onClick?.())
     return b

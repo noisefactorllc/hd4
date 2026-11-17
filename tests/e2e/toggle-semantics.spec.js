@@ -46,8 +46,8 @@ for (const theme of ['neutral-dark', 'ocean']) {
         test.afterEach(async () => { await session?.detach() })
 
         test('output, audio and tempo toggles expose model state to the accessibility tree', async ({ page }) => {
-            await roundTrip(page, session, '.hd4-output-btn[title^="Freeze the program"]', () => page.evaluate(() => window.__hd4.output.freeze))
-            await roundTrip(page, session, '.hd4-output-btn[title^="Fade the program"]', () => page.evaluate(() => window.__hd4.output.faded))
+            await roundTrip(page, session, '.hd4-output-btn[data-title^="Freeze the program"]', () => page.evaluate(() => window.__hd4.output.freeze))
+            await roundTrip(page, session, '.hd4-output-btn[data-title^="Fade the program"]', () => page.evaluate(() => window.__hd4.output.faded))
             for (let i = 0; i < 4; i++) {
                 for (const [kind, method] of [['mute', 'isMuted'], ['solo', 'isSoloed']]) {
                     await roundTrip(page, session, `.hd4-strip[data-channel="${i + 1}"] .hd4-${kind}-btn`, () => page.evaluate(({ i, method }) => window.__hd4.audio[method](i), { i, method }))
@@ -61,7 +61,7 @@ for (const theme of ['neutral-dark', 'ocean']) {
         test('composition, inclusion and transition selections expose their actual selected state', async ({ page }) => {
             await roundTrip(page, session, '.hd4-comp-key-btn', () => page.evaluate(() => window.__hd4.composition.key.on))
             for (const [mode, label] of [['pinp', 'PinP'], ['split', 'SPLIT'], ['quad', 'QUAD']]) {
-                await roundTrip(page, session, `.hd4-comp-modes button[title="${label} composition"]`, () => page.evaluate((mode) => window.__hd4.composition.composition === mode, mode))
+                await roundTrip(page, session, `.hd4-comp-modes button[data-title="${label} composition"]`, () => page.evaluate((mode) => window.__hd4.composition.composition === mode, mode))
             }
             for (let channel = 1; channel <= 4; channel++) {
                 await roundTrip(page, session, `.hd4-monitor[data-channel="${channel}"] .hd4-auto-include`, () => page.evaluate((n) => window.__hd4.autoMix.isIncluded(n), channel), true, 'is-on')
@@ -100,7 +100,7 @@ for (const theme of ['neutral-dark', 'ocean']) {
             await page.click(save)
             await expectPressed(page, session, save, false)
             await page.click('.hd4-strip[data-channel="2"] .hd4-mute-btn')
-            await page.click('.hd4-comp-modes button[title="PinP composition"]')
+            await page.click('.hd4-comp-modes button[data-title="PinP composition"]')
             await page.click('.hd4-trans-btn[data-type="cut"]')
             await page.click(save)
             await expectPressed(page, session, save, true)
@@ -109,11 +109,11 @@ for (const theme of ['neutral-dark', 'ocean']) {
             await expect.poll(() => page.evaluate(() => window.__hd4.memory.list().includes(3))).toBe(true)
             await expectSlot(true)
             await page.click('.hd4-strip[data-channel="2"] .hd4-mute-btn')
-            await page.click('.hd4-comp-modes button[title="PinP composition"]')
+            await page.click('.hd4-comp-modes button[data-title="PinP composition"]')
             await page.click('.hd4-trans-btn[data-type="wipe"]')
             await page.click(slot)
             await expectPressed(page, session, '.hd4-strip[data-channel="2"] .hd4-mute-btn', true, () => page.evaluate(() => window.__hd4.audio.isMuted(1)))
-            await expectPressed(page, session, '.hd4-comp-modes button[title="PinP composition"]', true, () => page.evaluate(() => window.__hd4.composition.composition === 'pinp'))
+            await expectPressed(page, session, '.hd4-comp-modes button[data-title="PinP composition"]', true, () => page.evaluate(() => window.__hd4.composition.composition === 'pinp'))
             await expectPressed(page, session, '.hd4-trans-btn[data-type="cut"]', true, () => page.evaluate(() => window.__hd4.switcher.type === 'cut'))
             await page.reload()
             await page.waitForFunction(() => window.__hd4?.ready === true, null, { timeout: 30_000 })

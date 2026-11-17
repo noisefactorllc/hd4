@@ -6,6 +6,7 @@
  * onAssign(slot, actionId|null).
  */
 import { USER_ACTIONS, userActionLabel } from '../userButtons.js'
+import { setTooltip } from './tooltip.js'
 
 const GROUPS = [
     ['Take', (id) => id.startsWith('take:')],
@@ -63,7 +64,7 @@ export function buildUserBar(container, { count = 5, initial = [], onTrigger, on
         if (!s) return
         s.sel.value = id || ''
         s.btn.textContent = id ? userActionLabel(id) : `U${i + 1}`
-        s.btn.title = id ? `USER ${i + 1}: ${userActionLabel(id)}` : `USER ${i + 1} (unassigned)`
+        setTooltip(s.btn, id ? `USER ${i + 1}: ${userActionLabel(id)}` : `USER ${i + 1} (unassigned)`)
         s.btn.classList.toggle('is-unassigned', !id)
     }
 

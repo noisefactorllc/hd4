@@ -13,6 +13,7 @@
  */
 import { VFX, VFX_ORDER } from '../vfx.js'
 import { logoSvg } from './logo.js'
+import { setTooltip } from './tooltip.js'
 
 export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord, onViewport, onRecoverTake, onRemoveTake } = {}) {
     container.innerHTML = ''
@@ -95,8 +96,8 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
             recover.el.hidden = !take?.size
             remove.el.hidden = !take
             if (take) {
-                recover.el.title = `Save ${take.filename}. The newest unsaved frames may be missing.`
-                remove.el.title = `Permanently remove ${take.filename} from this browser`
+                setTooltip(recover.el, `Save ${take.filename}. The newest unsaved frames may be missing.`)
+                setTooltip(remove.el, `Permanently remove ${take.filename} from this browser`)
             }
             updateRecordStatus()
         },
@@ -111,7 +112,7 @@ function toggleButton(label, onClick, title) {
     el.type = 'button'
     el.className = 'hd4-output-btn'
     el.textContent = label
-    if (title) el.title = title
+    if (title) setTooltip(el, title)
     el.addEventListener('click', () => onClick?.())
     return { el, setActive(on) { el.classList.toggle('is-active', !!on) } }
 }

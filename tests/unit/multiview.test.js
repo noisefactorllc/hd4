@@ -13,12 +13,15 @@ import { createSource } from '../../js/sources/sourceModel.js'
 
 const STILL_ID = 'c'.repeat(64)
 
-/** A minimal select: the option values the picker would hold. */
+/** A minimal select: the option values the picker would hold, and its tooltip. */
 function fakeSelect(values) {
+    const classes = new Set()
     return {
         options: values.map((value) => ({ value })),
         value: '',
-        title: '',
+        dataset: {},
+        classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+        removeAttribute() {},
         selectedOptions: [],
     }
 }

@@ -5,6 +5,7 @@
  * (through the current MIX/WIPE). Appends beside the program monitor; the
  * app blits the previewed channel into the monitor each frame.
  */
+import { setTooltip } from './tooltip.js'
 export function buildPreviewView(container, { channelCount = 4, onSelect, onTake, onAuto } = {}) {
     const wrap = document.createElement('div')
     wrap.className = 'hd4-preview-wrap'
@@ -31,7 +32,7 @@ export function buildPreviewView(container, { channelCount = 4, onSelect, onTake
         btn.className = 'hd4-pvw-btn'
         btn.dataset.channel = String(i)
         btn.textContent = String(i)
-        btn.title = `Queue channel ${i} on preview`
+        setTooltip(btn, `Queue channel ${i} on preview`)
         btn.setAttribute('aria-label', `Preview channel ${i}`)
         btn.addEventListener('click', () => onSelect?.(i))
         bus.appendChild(btn)
@@ -67,7 +68,7 @@ function actionButton(label, title, onClick) {
     b.type = 'button'
     b.className = 'hd4-preview-action'
     b.textContent = label
-    b.title = title
+    setTooltip(b, title)
     b.addEventListener('click', () => onClick?.())
     return b
 }

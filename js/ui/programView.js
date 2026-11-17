@@ -5,6 +5,7 @@
  * current transition); the live button lights, and pulses while a
  * transition is in flight. Returns the program canvas for the compositor.
  */
+import { setTooltip } from './tooltip.js'
 export function buildProgramView(container, { onTake } = {}) {
     container.innerHTML = ''
 
@@ -33,7 +34,7 @@ export function buildProgramView(container, { onTake } = {}) {
         btn.className = 'hd4-take-btn'
         btn.dataset.channel = String(i)
         btn.textContent = String(i)
-        btn.title = `Take channel ${i} to program (key ${i})`
+        setTooltip(btn, `Take channel ${i} to program (key ${i})`)
         btn.setAttribute('aria-label', `Take channel ${i} to program`)
         btn.addEventListener('click', () => onTake?.(i))
         bus.appendChild(btn)

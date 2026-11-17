@@ -5,6 +5,7 @@
  * and a post-fader level meter; the main strip has a fader and a meter.
  * Controls report via callbacks; meters are pushed in each frame.
  */
+import { setTooltip } from './tooltip.js'
 export function buildMixerPanel(container, {
     channelCount = 4,
     initialFaders = [],
@@ -101,7 +102,7 @@ function buildStrip(index, fader, { onFader, onMute, onSolo, onAudioSource, onEd
 function buildAudioSelect(index, onAudioSource) {
     const el = document.createElement('select')
     el.className = 'hd4-strip-audio'
-    el.title = 'Audio source'
+    setTooltip(el, 'Audio source')
     el.setAttribute('aria-label', `Channel ${index + 1} audio source`)
 
     const rebuild = (devices = []) => {
@@ -125,7 +126,7 @@ function buildAudioSelect(index, onAudioSource) {
     rebuild()
 
     // Device names clip in the narrow strip; surface the full name on hover.
-    function syncTitle() { el.title = el.selectedOptions[0]?.textContent || 'Audio source' }
+    function syncTitle() { setTooltip(el, el.selectedOptions[0]?.textContent || 'Audio source') }
 
     el.addEventListener('change', () => {
         syncTitle()
@@ -193,7 +194,7 @@ function buildAuxModule({ onMonitor, onRecordSource }) {
     mon.type = 'button'
     mon.className = 'hd4-strip-btn hd4-aux-mon'
     mon.textContent = 'MON'
-    mon.title = 'Monitor (audition) the AUX bus on the speakers'
+    setTooltip(mon, 'Monitor (audition) the AUX bus on the speakers')
     mon.setAttribute('aria-label', 'Monitor the AUX bus')
     const renderMonitor = () => { mon.classList.toggle('is-active', monitoring); mon.setAttribute('aria-pressed', String(monitoring)) }
     renderMonitor()
@@ -207,7 +208,7 @@ function buildAuxModule({ onMonitor, onRecordSource }) {
     const rec = document.createElement('button')
     rec.type = 'button'
     rec.className = 'hd4-strip-btn hd4-aux-recsrc'
-    rec.title = 'Recording source: program (PGM) or the AUX mix'
+    setTooltip(rec, 'Recording source: program (PGM) or the AUX mix')
     rec.setAttribute('aria-label', 'Recording source')
     const renderRec = () => { rec.textContent = toAux ? 'AUX' : 'PGM'; rec.classList.toggle('is-active', toAux) }
     renderRec()

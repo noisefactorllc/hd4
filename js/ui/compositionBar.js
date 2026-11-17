@@ -8,6 +8,7 @@
  * callbacks; setState() reflects the authoritative CompositorState.
  */
 import { PINP_SIZES, PINP_SHAPES, PINP_ASPECTS, BORDER_COLORS } from '../compositing.js'
+import { setTooltip } from './tooltip.js'
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 
@@ -209,7 +210,7 @@ function button(label, title, onClick) {
     b.type = 'button'
     b.className = 'hd4-comp-btn'
     b.textContent = label
-    b.title = title
+    setTooltip(b, title)
     b.addEventListener('click', onClick)
     return b
 }
