@@ -37,6 +37,9 @@ async function transact(mode, work) {
 
 const chunkRange = (id) => IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER])
 
+// Interrupted takes kept for Recover unsaved work; older ones are pruned.
+export const MAX_INTERRUPTED_TAKES = 3
+
 export async function beginTake(take) {
     if (!globalThis.navigator?.locks) throw new Error('Recording recovery needs browser lock support')
     // The browser releases this lock on tab close or reload. A different tab
@@ -49,7 +52,14 @@ export async function beginTake(take) {
     await Promise.race([ready, lock])
     try { await transact('readwrite', (takes) => takes.put(take)) }
     catch (error) { release(); throw error }
+    void pruneInterruptedTakes().catch(() => {})
     return release
+}
+
+/** Keep the newest MAX_INTERRUPTED_TAKES interrupted takes; remove older ones. */
+export async function pruneInterruptedTakes(max = MAX_INTERRUPTED_TAKES) {
+    const takes = await recoverableTakes()
+    for (const take of takes.slice(0, Math.max(0, takes.length - max))) await removeTake(take.id)
 }
 
 export async function appendTakeChunk(take, index, blob) {

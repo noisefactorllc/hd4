@@ -9,14 +9,20 @@
 
 import { beginTake, appendTakeChunk } from './recordingStorage.js'
 
-// WebM emits usable incremental data. Some MP4 encoders buffer the entire
-// take until Stop, so they cannot provide an interruption checkpoint.
+// Each timeslice is saved as it arrives, so an interruption loses at most one.
+const TIMESLICE_MS = 500
+
+/** Preferred container/codec combos, best first. WebM wherever the browser
+ * records it; MP4 for browsers that record only MP4. Both arrive in
+ * timeslices that save as they record. */
 export const RECORDING_MIME_PREFERENCES = [
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
     'video/webm;codecs=vp9',
     'video/webm;codecs=vp8',
     'video/webm',
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4',
 ]
 
 /** First supported mime from the preference list, or '' if none. */
@@ -59,11 +65,18 @@ export class Recorder {
     /** Start recording a MediaStream. Returns true if it began. */
     async start(stream, { now = 0 } = {}) {
         if (this.state !== 'idle' || !this._Impl || !stream) return false
-        this.state = 'starting'
         const mime = pickMimeType((m) => this._Impl.isTypeSupported(m))
+        if (!mime) {
+            stream.getVideoTracks().forEach((track) => track.stop())
+            return false
+        }
+        this.state = 'starting'
         try {
-            if (!mime) throw new Error('This browser cannot preserve WebM recordings')
-            this._rec = new this._Impl(stream, { mimeType: mime })
+            const options = { mimeType: mime }
+            // An MP4 recorder writes a fragment only at a keyframe. A keyframe
+            // each timeslice lets an MP4 take save as it records, like WebM.
+            if (recordingExtension(mime) === 'mp4') options.videoKeyFrameIntervalDuration = TIMESLICE_MS
+            this._rec = new this._Impl(stream, options)
             this._stream = stream
             this._chunks = []
             this._pending = Promise.resolve()
@@ -93,7 +106,7 @@ export class Recorder {
                 })
             }
             this._rec.onerror = (e) => this._onError?.(e.error || new Error('Recording failed'))
-            this._rec.start(500)
+            this._rec.start(TIMESLICE_MS)
             this.state = 'recording'
             this._startTime = now
             return true

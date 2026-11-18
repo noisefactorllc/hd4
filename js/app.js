@@ -41,7 +41,7 @@ import { MemoryStore, captureSnapshot, applySnapshot, slotStillIds } from './mem
 import { StillStore } from './still.js'
 import { getStill, memoryStillsMigrated, migrateMemoryStills, storeEmbeddedStills } from './stillStorage.js'
 import { Recorder } from './recorder.js'
-import { recoverableTakes, readTake, removeTake } from './recordingStorage.js'
+import { pruneInterruptedTakes, recoverableTakes, readTake, removeTake } from './recordingStorage.js'
 import { Settings, parseResolution } from './settings.js'
 import { applyTheme } from './theme.js'
 import { attachKeyboard } from './keyboard.js'
@@ -190,8 +190,6 @@ async function bootInto({ container = null, audioContext = null, destination = n
     const topbar = byId('hd4-topbar')
     topbar.classList.add('hf-topbar')
     const outputBar = buildOutputBar(topbar, {
-        onRecoverTake: (take) => recoverTake(take),
-        onRemoveTake: (take) => discardTake(take),
         onFreeze: () => { output.toggleFreeze(); showParam('FREEZE', output.freeze ? 'ON' : 'OFF') },
         onFade: () => { output.toggleFade(now()); showParam('FADE', output.faded ? 'ON' : 'OFF') },
         onVfx: (name) => { output.setVfx(name); showParam('VFX', String(name).toUpperCase()) },
@@ -393,6 +391,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
         onFadeTime: (v) => { settings.set('outputFadeTime', v); output.setFadeTime(v) },
         onBeatSensitivity: (v) => { settings.set('beatSensitivity', v); beatDetect.setSensitivity(v) },
         onTheme: (v) => { settings.set('theme', v); applyTheme(v) },
+        onRecoverUnsavedWork: () => recoverUnsavedWork(),
     })
     // Normalized top-bar cluster (upper-right): settings gear + info. The gear
     // is the drawer's own toggle (keeps its .hd4-settings-gear class + wiring);
@@ -530,22 +529,24 @@ async function bootInto({ container = null, audioContext = null, destination = n
         } catch (e) { console.warn('[hd4] recording without audio', e?.message || e) }
         return stream
     }
-    const refreshRecoveredTakes = async () => {
-        try { outputBar.setRecovery((await recoverableTakes())[0] || null) }
-        catch { outputBar.setRecordingError('Saved takes could not be read from this browser.') }
-    }
-    const recoverTake = async (take) => {
-        if (!take) return
-        try {
-            const blob = await readTake(take)
-            if (blob?.size) downloadBlob(blob, take.filename)
-            await refreshRecoveredTakes()
-        } catch { outputBar.setRecordingError('The saved take could not be read. It has not been removed.') }
-    }
-    const discardTake = async (take) => {
-        if (!take) return
-        try { await removeTake(take.id); await refreshRecoveredTakes() }
-        catch { outputBar.setRecordingError('The saved take could not be removed.') }
+    // Settings > Recover unsaved work: download each take that a reload, a
+    // closed tab or a crash interrupted, newest first, and remove each one
+    // once its download starts. With none stored it does nothing.
+    const recoverUnsavedWork = async () => {
+        let takes
+        try { takes = await recoverableTakes() } catch (error) {
+            console.error('[hd4] recovered takes could not be read', error)
+            return false
+        }
+        for (const take of takes.reverse()) {
+            try {
+                const blob = await readTake(take)
+                if (blob === null) continue // another tab owns it now
+                if (blob.size) downloadBlob(blob, take.filename)
+                await removeTake(take.id)
+            } catch (error) { console.error('[hd4] recovered take could not be saved', error) }
+        }
+        return takes.length > 0
     }
     let finishingRecording = null
     function finishRecording(removeSaved = true) {
@@ -556,7 +557,6 @@ async function bootInto({ container = null, audioContext = null, destination = n
             if (out?.blob.size > 0) downloadBlob(out.blob, out.filename)
             state.lastRecording = out ? { size: out.blob.size, type: out.type } : null
             if (out && removeSaved && !recorder.storageError) await removeTake(out.id)
-            await refreshRecoveredTakes()
         })().catch(() => {
             outputBar.setRecordingError('The take could not be saved. Keep this tab open.')
         }).finally(() => { finishingRecording = null })
@@ -577,8 +577,7 @@ async function bootInto({ container = null, audioContext = null, destination = n
             recordingAction = false
         }
     }
-    void refreshRecoveredTakes()
-    window.addEventListener('focus', refreshRecoveredTakes)
+    void pruneInterruptedTakes().catch((error) => console.error('[hd4] interrupted takes could not be pruned', error))
 
     // --- Audio mixer panel (channel strips + main) ---
     const mixerPanel = buildMixerPanel(byId('hd4-mixer'), {
@@ -1251,7 +1250,6 @@ async function bootInto({ container = null, audioContext = null, destination = n
         stop() {
             if (_rafId != null) { cancelAnimationFrame(_rafId); _rafId = null }
             window.removeEventListener('pagehide', onPageHide)
-            window.removeEventListener('focus', refreshRecoveredTakes)
             if (recorder.recording) void recorder.stop()
             detachProgramPaste()
             try { disposeOutputs() } catch (e) { console.warn('[hd4] output teardown', e?.message || e) }

@@ -23,7 +23,7 @@ const SHORTCUTS = [
     ['⌘/Ctrl V', 'Paste program to PVW'],
 ]
 
-export function buildSettingsDrawer(container, settings, { onResolution, onFadeTime, onBeatSensitivity, onTheme } = {}) {
+export function buildSettingsDrawer(container, settings, { onResolution, onFadeTime, onBeatSensitivity, onTheme, onRecoverUnsavedWork } = {}) {
     const overlay = document.createElement('div')
     overlay.className = 'hd4-settings-overlay'
     overlay.dataset.open = 'false'
@@ -56,6 +56,7 @@ export function buildSettingsDrawer(container, settings, { onResolution, onFadeT
     panel.appendChild(section('Output Fade', [rows.outputFadeTime]))
     panel.appendChild(section('Beat (SYNC)', [rows.beatSensitivity]))
     panel.appendChild(section('Appearance', [rows.theme]))
+    panel.appendChild(section('Recording', [buttonRow('Recover unsaved work', () => onRecoverUnsavedWork?.())]))
 
     const shortcuts = document.createElement('div')
     shortcuts.className = 'hd4-settings-shortcuts'
@@ -141,6 +142,18 @@ function selectRow(id, label, options, value, onChange) {
     sel.addEventListener('change', () => onChange(sel.value))
     row.append(lab, sel)
     row.show = (v) => { sel.value = v }
+    return row
+}
+
+function buttonRow(label, onClick) {
+    const row = document.createElement('div')
+    row.className = 'hd4-settings-row'
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'hd4-output-btn'
+    button.textContent = label
+    button.addEventListener('click', onClick)
+    row.append(button)
     return row
 }
 

@@ -27,6 +27,18 @@ test('the preference list prefers mp4/webm with audio codecs', () => {
     assert.ok(RECORDING_MIME_PREFERENCES.some((m) => m.includes('opus')))
 })
 
+test('WebM is chosen wherever it is supported, and MP4 where only MP4 is', () => {
+    const firstMp4 = RECORDING_MIME_PREFERENCES.findIndex((m) => m.startsWith('video/mp4'))
+    assert.ok(firstMp4 > 0)
+    assert.ok(RECORDING_MIME_PREFERENCES.slice(0, firstMp4).every((m) => m.startsWith('video/webm')))
+    const all = (m) => m.startsWith('video/webm') || m.startsWith('video/mp4')
+    assert.equal(pickMimeType(all), 'video/webm;codecs=vp9,opus')
+    const mp4Only = (m) => m.startsWith('video/mp4')
+    assert.equal(pickMimeType(mp4Only), 'video/mp4;codecs=avc1.42E01E,mp4a.40.2')
+    assert.equal(pickMimeType((m) => m === 'video/mp4'), 'video/mp4')
+    assert.equal(pickMimeType(() => false), '')
+})
+
 test('recordingExtension maps mime to a file extension', () => {
     assert.equal(recordingExtension('video/mp4;codecs=avc1'), 'mp4')
     assert.equal(recordingExtension('video/webm;codecs=vp9,opus'), 'webm')

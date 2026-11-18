@@ -15,7 +15,7 @@ import { VFX, VFX_ORDER } from '../vfx.js'
 import { logoSvg } from './logo.js'
 import { setTooltip } from './tooltip.js'
 
-export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord, onViewport, onRecoverTake, onRemoveTake } = {}) {
+export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, onRecord, onViewport } = {}) {
     container.innerHTML = ''
 
     const logo = document.createElement('div')
@@ -38,21 +38,10 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
     const record = toggleButton('REC', onRecord, 'Record the program (key r)')
     record.el.classList.add('hd4-rec-btn')
 
-    let recoveredTake = null
-    const recover = toggleButton('SAVE TAKE', () => onRecoverTake?.(recoveredTake), 'Download the saved part of an interrupted recording')
-    recover.el.setAttribute('aria-label', 'Save recovered take')
-    const remove = toggleButton('×', () => onRemoveTake?.(recoveredTake), 'Permanently remove this saved take from this browser')
-    remove.el.setAttribute('aria-label', 'Remove recovered take')
-    recover.el.hidden = remove.el.hidden = true
     const recordStatus = document.createElement('span')
     recordStatus.className = 'hd4-rec-status'
     recordStatus.setAttribute('role', 'status')
     recordStatus.setAttribute('aria-live', 'polite')
-    let recordingError = ''
-    const updateRecordStatus = () => {
-        recordStatus.textContent = recordingError || (recoveredTake?.size === 0
-            ? 'Recording interrupted before any frames were saved.' : '')
-    }
 
     const vfxSelect = document.createElement('select')
     vfxSelect.className = 'hd4-vfx-select'
@@ -76,7 +65,7 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
     syncOut.el.prepend(syncMark)
     const viewport = toggleButton('VIEWPORT', onViewport, 'Open the program in a window for a secondary display (close that window to detach)')
 
-    group.append(freeze.el, fade.el, still.el, record.el, recover.el, remove.el, recordStatus, vfxSelect, syncOut.el, viewport.el)
+    group.append(freeze.el, fade.el, still.el, record.el, recordStatus, vfxSelect, syncOut.el, viewport.el)
     container.append(logo, group)
 
     return {
@@ -91,17 +80,7 @@ export function buildOutputBar(container, { onFreeze, onFade, onVfx, onStill, on
             record.setActive(on)
             record.el.textContent = on ? (label || '● REC') : 'REC'
         },
-        setRecovery(take) {
-            recoveredTake = take
-            recover.el.hidden = !take?.size
-            remove.el.hidden = !take
-            if (take) {
-                setTooltip(recover.el, `Save ${take.filename}. The newest unsaved frames may be missing.`)
-                setTooltip(remove.el, `Permanently remove ${take.filename} from this browser`)
-            }
-            updateRecordStatus()
-        },
-        setRecordingError(message = '') { recordingError = message; updateRecordStatus() },
+        setRecordingError(message = '') { recordStatus.textContent = message },
         setSyncLive(on) { syncOut.setActive(on) },
         setViewport(on) { viewport.setActive(on) },
     }
