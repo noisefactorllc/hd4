@@ -159,6 +159,25 @@ test('enqueue rejects a canvas whose size no longer matches the descriptor', () 
     assert.throws(() => queue.enqueue({ width: 8, height: 2 }, 0, () => {}, 1), RangeError)
 })
 
+test('a failed upload restores row order and does not enqueue a partial frame', () => {
+    const gpu = fakeGpu()
+    const canvas = { width: 4, height: 2 }
+    const queue = makeQueue(gpu, canvas)
+    queue.configure(DESCRIPTOR)
+    const gl = gpu.contexts[0].gl
+    const upload = gl.texSubImage2D
+    gl.texSubImage2D = () => { throw new Error('upload failed') }
+
+    assert.throws(() => queue.enqueue(canvas, 1, () => {}, 1), /upload failed/)
+    assert.equal(gl.flipY, false)
+    assert.deepEqual(gpu.queues[0].events, [['configure', DESCRIPTOR]])
+
+    gl.texSubImage2D = upload
+    assert.equal(queue.enqueue(canvas, 2, () => {}, 2), true)
+    assert.equal(gpu.queues[0].events.at(-1)[3], 2)
+    queue.close()
+})
+
 test('poll forwards to the SDK queue while the context is healthy', () => {
     const gpu = fakeGpu()
     const queue = makeQueue(gpu)
@@ -257,4 +276,23 @@ test('close releases the texture, framebuffer and context and stays closed', () 
     queue.poll()
     queue.close()
     assert.equal(gpu.contexts.length, 1)
+})
+
+test('an SDK close failure still releases GPU resources and the context listener', () => {
+    const gpu = fakeGpu()
+    const queue = makeQueue(gpu)
+    queue.configure(DESCRIPTOR)
+    let closeCalls = 0
+    gpu.queues[0].close = () => {
+        closeCalls++
+        throw new Error('SDK teardown failed')
+    }
+
+    assert.doesNotThrow(() => queue.close())
+    assert.equal(queue.available, false)
+    assert.deepEqual(gpu.contexts[0].gl.deleted.sort(), ['framebuffer', 'texture'])
+    assert.equal(gpu.contexts[0].gl.lostByApp, true)
+    assert.equal(gpu.contexts[0].listeners.size, 0)
+    queue.close()
+    assert.equal(closeCalls, 1)
 })
